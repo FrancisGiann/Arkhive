@@ -1,10 +1,12 @@
 # Arkhive - Manga & Novel Reader
 
+**Incomplete preview:** Online text-novel source browsing, in-app online novel chapter reading, and novel chapter download/batch queues are not implemented. These remain part of the original accepted scope. This build provides native manga/image-source reading and local EPUB/PDF/text novel reading; catalog metadata and external links do not provide an online novel reader.
+
 An Android reader for manga, manhwa, manhua, webtoons and local EPUB, PDF or novel text. The cover-led library keeps reading, progress, bookmarks and optional offline manga downloads in focus. Buying/catalog lookup stays in a separate secondary tab.
 
 ## Download
 
-[Download the latest release](https://github.com/FrancisGiann/Arkhive/releases/latest).
+[Download the incomplete preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.3.1-storyboard2-1).
 
 - **ARM64 APK:** for an ARM64 POCO and other compatible ARM64 devices. 60,004,016 bytes (57.22 MiB).
 - **Universal APK:** includes ARM64, ARMv7, x86 and x86_64. 100,313,015 bytes (95.67 MiB).
@@ -39,6 +41,10 @@ These are genuine API35 Android emulator captures of the released build. All vis
 **Novels and PDF:** Library -> More -> Import EPUB / PDF / text copies whole owned/lawful books for offline reading. The file picker supports selecting multiple documents. This build has no remote text-novel chapter batch downloader; a catalog result does not provide licensed readable text.
 
 Batch menu/selection and multiple-series paths above are inspected in the shipped implementation. The runtime offline test covers one original chapter: persisted paused queue, force-stop restoration and native completion, then restart with airplane mode/Wi-Fi off/no network; six loader pages are returned and visible page0 is actually decoded. Multi-title/large batches and external-source downloads have not been stress-tested.
+
+## Online novel implementation still required
+
+Add a separate text-novel source contract for search/catalogue, title and chapter lists, and authorized chapter HTML/text. Sanitize that content and connect it to the existing serif reader with durable chapter locators, progress and bookmarks. Add a persisted chapter cache and bounded pause/resume/retry queue, including offline reading after restart and multi-chapter/multi-title testing. Preserve the manga engine and current design. Start with lawful built-in adapters and authored HTTP fixtures; do not install third-party executable source plugins without approval.
 
 ## Reading and verification
 
