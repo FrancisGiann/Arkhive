@@ -6,12 +6,11 @@ An Android reader for manga, manhwa, manhua, webtoons and local EPUB, PDF or nov
 
 ## Download
 
-[Download the incomplete preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.3.1-storyboard2-1).
+[Download the incomplete preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.3.1).
 
-- **ARM64 APK:** for an ARM64 POCO and other compatible ARM64 devices. 60,004,016 bytes (57.22 MiB).
-- **Universal APK:** includes ARM64, ARMv7, x86 and x86_64. 100,313,015 bytes (95.67 MiB).
+[**Arkhive-0.3.1.apk**](https://github.com/FrancisGiann/Arkhive/releases/download/v0.3.1/Arkhive-0.3.1.apk) — 100,313,015 bytes (95.67 MiB). One installable APK includes ARM64, ARMv7, x86 and x86_64.
 
-Both APKs are the same **0.3.1-storyboard2-1**, version code **5**, and use the same package and signing certificate. Android 8.0/API26 or later is required. Install through Android's normal installer; update the existing installation to keep its data. This is a debug build; physical POCO installation and performance have not been tested.
+The filename is version-only. The unchanged internal build is **0.3.1-storyboard2-1**, version code **5**, retaining the existing package and signing certificate. Android 8.0/API26 or later is required. Install through Android's normal installer; update the existing installation to keep its data. This is a debug build; physical POCO installation and performance have not been tested.
 
 ## Actual app screenshots
 
@@ -51,7 +50,7 @@ Add a separate text-novel source contract for search/catalogue, title and chapte
 - Native Mihon source/extension and image-reader host; library, progress and bookmarks.
 - Local EPUB/text via Readium and PDF via an isolated Android renderer.
 - Continuous adjustable auto-scroll, timed screen/page steps and manual taps. Explicit Start; touch, background and chapter boundaries pause playback.
-- 40 JVM tests, 16 Android core tests and four staged offline checks passed on the matching universal build. Actual EPUB motion/pause and durable bookmarks were also verified. The ARM64 package retains all 2,263 payload entries byte-for-byte from that universal build; only other architecture libraries are omitted.
+- 40 JVM tests, 16 Android core tests and four staged offline checks passed on the matching universal build. Actual EPUB motion/pause and durable bookmarks were also verified. The release APK is byte-for-byte identical to the tested universal build; only its download filename changed.
 
 No physical device/ARM64 runtime, API26/API36 runtime matrix, measured120fps, full TalkBack or large interrupted-download matrix is claimed. Unsupported source rankings stay unavailable; live trend/catalog data retains its provider scope. Broken external sources are not universally guaranteed.
 
