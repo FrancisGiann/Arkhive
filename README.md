@@ -6,15 +6,25 @@ An Android reader for manga, manhwa, manhua, webtoons and local EPUB, PDF or nov
 
 ## Download
 
-[Download the incomplete preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.3.1).
+[Download the incomplete preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.3.2).
 
-[**Arkhive-0.3.1.apk**](https://github.com/FrancisGiann/Arkhive/releases/download/v0.3.1/Arkhive-0.3.1.apk) — 100,313,015 bytes (95.67 MiB). One installable APK includes ARM64, ARMv7, x86 and x86_64.
+[**Arkhive-0.3.2.apk**](https://github.com/FrancisGiann/Arkhive/releases/download/v0.3.2/Arkhive-0.3.2.apk) — 106,036,351 bytes (101.12 MiB). One installable APK includes ARM64, ARMv7, x86 and x86_64.
 
-The filename is version-only. The unchanged internal build is **0.3.1-storyboard2-1**, version code **5**, retaining the existing package and signing certificate. Android 8.0/API26 or later is required. Install through Android's normal installer; update the existing installation to keep its data. This is a debug build; physical POCO installation and performance have not been tested.
+The filename is version-only. The internal build is **0.3.2-1**, version code **6**, retaining the existing package and signing certificate. Android 8.0/API26 or later is required. Install through Android's normal installer; update the existing installation to keep its data. This is a debug build; physical POCO installation and performance have not been tested.
+
+## Changes in 0.3.2
+
+- Removed the duplicate More block above Settings; one header and a separate rounded panel remain.
+- Arkhive launcher, splash, Settings, Support and About identity, with upstream credits preserved.
+- Long manga pages retain width and position with bounded region decoding and a Full width reader option.
+- Real Open Library catalogue pagination, deduplication, retry and retained scroll.
+- Buy supports title/author/ISBN and retains matching editions when prices or regions are unavailable; provider errors stay distinct.
+
+SHA-256: `6bfe16b654bdb250c0688a45d86d83643f0c261df95b2923bbe11fdb810e2736`. [Checksum file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.3.2/Arkhive-0.3.2.apk.sha256).
 
 ## Actual app screenshots
 
-These are genuine API35 Android emulator captures of the released build. All visible stories, covers and reading progress are self-authored synthetic test fixtures. They are not real personal reading history. The main APK does not seed this test library.
+These are genuine API35 Android emulator captures from preview 0.3.1, retained as a design gallery. The new 0.3.2 fixes include a single Settings header and Arkhive branding. All visible stories, covers and reading progress are self-authored synthetic test fixtures. They are not real personal reading history. The main APK does not seed this test library.
 
 <table>
 <tr><th>Library</th><th>Local chapters</th><th>Manga chapters</th></tr>
@@ -50,7 +60,7 @@ Add a separate text-novel source contract for search/catalogue, title and chapte
 - Native Mihon source/extension and image-reader host; library, progress and bookmarks.
 - Local EPUB/text via Readium and PDF via an isolated Android renderer.
 - Continuous adjustable auto-scroll, timed screen/page steps and manual taps. Explicit Start; touch, background and chapter boundaries pause playback.
-- 40 JVM tests, 16 Android core tests and four staged offline checks passed on the matching universal build. Actual EPUB motion/pause and durable bookmarks were also verified. The release APK is byte-for-byte identical to the tested universal build; only its download filename changed.
+- 53 JVM tests and 21 Android runtime tests passed on the matching 0.3.2 universal build, including extreme tall-page reading, Buy edition matching, Settings/Support/About navigation, native source/image/offline progress and local-book flows. The release APK is byte-for-byte identical to the tested universal build; only its download filename changed.
 
 No physical device/ARM64 runtime, API26/API36 runtime matrix, measured120fps, full TalkBack or large interrupted-download matrix is claimed. Unsupported source rankings stay unavailable; live trend/catalog data retains its provider scope. Broken external sources are not universally guaranteed.
 
