@@ -1,8 +1,11 @@
 package mihon.readingapp.novels
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -19,6 +22,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextOverflow
@@ -148,6 +153,7 @@ class NovelCatalogScreen(private val sourceId: String) : Screen() {
 class NovelDetailScreen(private val sourceId:String,private val path:String) : Screen() {
     @Composable override fun Content() = NovelDetail(sourceId,path)
 }
+@OptIn(ExperimentalLayoutApi::class)
 @Composable private fun NovelDetail(sourceId:String,path:String) = InkSettingsTheme {
     val context=LocalContext.current;val nav=LocalNavigator.currentOrThrow;val uri=LocalUriHandler.current
     val sourceRegistry=currentNovelSources()
@@ -193,76 +199,167 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
     InkStatusBarStyle(Ink.HeroSurface)
     Column(Modifier.fillMaxSize().background(Ink.HeroSurface)) {
         ArkhiveSettingsHeader("Novel", { nav.pop(); Unit }, hero = true)
-        novel?.let {n->Row(Modifier.fillMaxWidth().padding(start=22.dp,end=22.dp,bottom=22.dp),horizontalArrangement=Arrangement.spacedBy(18.dp)) {
-            NovelCoverImage(
-                sourceId, n.detail.name, n.detail.cover, Modifier.width(90.dp).height(130.dp),
-                retryToken = refresh + coverRetry,
-                onExtensionCoverError = { coverError = it },
-                onUnapprovedCoverOrigin = { coverOriginSuggestion = it },
-            )
-            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                InkKicker("Source edition", color = Ink.HeroMuted);Text(n.detail.name.uppercase(),style=Ink.Display.copy(fontSize=24.sp,lineHeight=28.sp),color=Ink.HeroText)
-                n.detail.author?.let {Text(it,color=Ink.HeroMuted,fontSize=12.sp)}
-                Text("${runCatching {sourceRegistry.get(sourceId).name}.getOrDefault("Saved novel source")} · ${chapters.size} chapters",color=Ink.HeroMuted,fontSize=11.sp)
-                val saved = n.savedChapters.coerceIn(0,n.totalChapters)
-                val activeCount = titleDownloads.count {it.state=="downloading"}
-                val queuedCount = titleDownloads.count {it.state=="queued"}
-                val retryCount = titleDownloads.count {it.state=="retry"}
-                val failedCount = titleDownloads.count {it.state=="failed"}
-                Text(buildList {
-                    add(if(n.totalChapters>0 && saved==n.totalChapters) "Saved offline" else "Saved $saved/${n.totalChapters}")
-                    if(activeCount>0) add("$activeCount downloading")
-                    if(queuedCount>0) add(if(updates.paused) "$queuedCount queued · paused" else "$queuedCount queued")
-                    if(retryCount>0) add("$retryCount to retry")
-                    if(failedCount>0) add("$failedCount failed")
-                }.joinToString(" · "),color=Ink.HeroMuted,fontSize=11.sp)
-                TextButton(onClick={scope.launch {repository.favorite(n.id,!n.favorite);reload()}}) {Text(if(n.favorite) "In your library ✓" else "Add to library",color=Ink.HeroText)}
-                TextButton(onClick={tools=true}) { Text("Series tools", color=Ink.HeroText) }
-            }
-        }}
-        coverError?.let { message -> Column(Modifier.fillMaxWidth().padding(horizontal=22.dp).padding(bottom=12.dp)) {
-            Text(message,color=Ink.HeroMuted,fontSize=11.sp)
-            TextButton(onClick={nav.push(NovelExtensionsScreen(coverOriginSuggestion, sourceId))}) {Text("Review extension origins",color=Ink.HeroText)}
-        }}
-        LazyColumn(Modifier.weight(1f).clip(RoundedCornerShape(topStart=18.dp,topEnd=18.dp)).background(Ink.Panel),contentPadding=PaddingValues(22.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            if(busy) item {LinearProgressIndicator(Modifier.fillMaxWidth())}
-            if(error!=null) item {Text(error!!,color=Ink.Muted);TextButton(onClick={refresh++}) {Text("Retry source")}}
-            novel?.let {n->
-                item {Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
-                    InkKicker("Chapters");TextButton(onClick={refresh++},enabled=!busy) {Text("Refresh")}
-                }}
-                item {Button(onClick={context.startActivity(NovelReaderActivity.intent(context,n.id,n.lastChapter))},enabled=chapters.isNotEmpty(),modifier=Modifier.fillMaxWidth()) {Text(if(n.lastChapter==null) "Start reading" else "Continue reading")}}
-                item {Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    InkPill("Download",modifier=Modifier.weight(1f)) {batches=true}
-                    InkPill(if(selecting) "Done" else "Select",modifier=Modifier.weight(1f)) {selecting=!selecting;selected=emptySet()}
-                    InkPill("Queue",modifier=Modifier.weight(1f)) {nav.push(NovelDownloadsScreen())}
-                }}
-                if(selecting) item {Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-                    TextButton(onClick={selected=chapters.mapTo(hashSetOf()){it.id}}) {Text("Select all")}
-                    TextButton(onClick={queue(selected)},enabled=selected.isNotEmpty()) {Text("Save ${selected.size}")}
-                    TextButton(onClick={removing=chapters.filter {it.id in selected && it.cached}},enabled=chapters.any {it.id in selected && it.cached}) {Text("Remove saved")}
-                }}
-                items(chapters,key={it.id}) {c->Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Ink.Raised).clickable {
-                    if(selecting) selected=if(c.id in selected) selected-c.id else selected+c.id
-                    else context.startActivity(NovelReaderActivity.intent(context,n.id,c.id))
-                }.padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
-                    if(selecting) Checkbox(c.id in selected,{selected=if(it) selected+c.id else selected-c.id})
-                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                        Text(c.name,color=Ink.Text,fontSize=14.sp)
-                        val queued = downloadByChapter[c.id]
-                        Text(listOfNotNull(if(c.progression>=.999) "Read" else if(c.progression>0) "${(c.progression*100).toInt()}%" else "Unread",
-                            if(c.downloaded) "Saved offline" else null,
-                            queued?.let { when(it.state) {"downloading"->"Downloading";"queued"->"Queued";"retry"->"Retry pending";"failed"->"Failed";else->null} },
-                            if(c.bookmark) "Bookmarked" else null).joinToString(" · "),color=Ink.Muted,fontSize=11.sp)
-                    }
-                    if(!selecting) TextButton(onClick={
-                        when(downloadByChapter[c.id]?.state) {
-                            "downloading","queued" -> scope.launch { repository.cancel(c.id); reload() }
-                            "retry","failed" -> scope.launch { repository.retry(c.id); reload() }
-                            else -> if(c.downloaded) removing=listOf(c) else queue(listOf(c.id))
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth().background(Ink.Panel),
+            contentPadding = PaddingValues(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            novel?.let { n ->
+                item(key = "detail-hero") {
+                    val saved = n.savedChapters.coerceIn(0, n.totalChapters)
+                    val activeCount = titleDownloads.count { it.state == "downloading" }
+                    val queuedCount = titleDownloads.count { it.state == "queued" }
+                    val retryCount = titleDownloads.count { it.state == "retry" }
+                    val failedCount = titleDownloads.count { it.state == "failed" }
+                    Column(
+                        Modifier.fillMaxWidth().background(Ink.HeroSurface)
+                            .padding(horizontal = 22.dp, vertical = 18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            NovelCoverImage(
+                                sourceId, n.detail.name, n.detail.cover, Modifier.width(88.dp).height(126.dp),
+                                retryToken = refresh + coverRetry,
+                                onExtensionCoverError = { coverError = it },
+                                onUnapprovedCoverOrigin = { coverOriginSuggestion = it },
+                            )
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                InkKicker("Source edition", color = Ink.HeroMuted)
+                                n.detail.author?.let { Text(it, color = Ink.HeroMuted, fontSize = 12.sp) }
+                                Text(
+                                    "${runCatching { sourceRegistry.get(sourceId).name }.getOrDefault("Saved novel source")} · ${chapters.size} chapters",
+                                    color = Ink.HeroMuted,
+                                    fontSize = 11.sp,
+                                )
+                                Text(buildList {
+                                    add(if (n.totalChapters > 0 && saved == n.totalChapters) "Saved offline" else "Saved $saved/${n.totalChapters}")
+                                    if (activeCount > 0) add("$activeCount downloading")
+                                    if (queuedCount > 0) add(if (updates.paused) "$queuedCount queued · paused" else "$queuedCount queued")
+                                    if (retryCount > 0) add("$retryCount to retry")
+                                    if (failedCount > 0) add("$failedCount failed")
+                                }.joinToString(" · "), color = Ink.HeroMuted, fontSize = 11.sp)
+                            }
                         }
-                    }) {Text(when(downloadByChapter[c.id]?.state) {"downloading"->"Cancel";"queued"->"Cancel";"retry","failed"->"Retry";else->if(c.downloaded) "Remove" else "↓"})}
-                }}
+                        Text(
+                            text = n.detail.name,
+                            modifier = Modifier.fillMaxWidth().semantics { contentDescription = n.detail.name },
+                            style = Ink.Display.copy(fontSize = 23.sp, lineHeight = 29.sp),
+                            color = Ink.HeroText,
+                        )
+                        FlowRow(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = { scope.launch { repository.favorite(n.id, !n.favorite); reload() } },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
+                                border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
+                            ) { Text(if (n.favorite) "In your library ✓" else "Add to library", maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                            OutlinedButton(
+                                onClick = { tools = true },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
+                                border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
+                            ) { Text("Series tools", maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        }
+                    }
+                }
+                coverError?.let { message ->
+                    item(key = "cover-origin-review") {
+                        Column(
+                            Modifier.fillMaxWidth().background(Ink.HeroSurface)
+                                .padding(start = 22.dp, end = 22.dp, bottom = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(message, color = Ink.HeroMuted, fontSize = 12.sp)
+                            OutlinedButton(
+                                onClick = { nav.push(NovelExtensionsScreen(coverOriginSuggestion, sourceId)) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
+                                border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
+                            ) { Text("Review extension origins", maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        }
+                    }
+                }
+            }
+            item(key = "detail-chapter-panel") {
+                Column(Modifier.fillMaxWidth().background(Ink.HeroSurface)) {
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                            .background(Ink.Panel).padding(horizontal = 22.dp, vertical = 18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    error?.let { problem ->
+                        Text(problem, color = Ink.Muted)
+                        TextButton(onClick = { refresh++ }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Retry source") }
+                    }
+                    novel?.let { n ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            InkKicker("Chapters")
+                            TextButton(onClick = { refresh++ }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text("Refresh") }
+                        }
+                        Button(
+                            onClick = { context.startActivity(NovelReaderActivity.intent(context, n.id, n.lastChapter)) },
+                            enabled = chapters.isNotEmpty(),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        ) { Text(if (n.lastChapter == null) "Start reading" else "Continue reading") }
+                        FlowRow(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            InkPill("Download") { batches = true }
+                            InkPill(if (selecting) "Done" else "Select") { selecting = !selecting; selected = emptySet() }
+                            InkPill("Queue") { nav.push(NovelDownloadsScreen()) }
+                        }
+                        if (selecting) FlowRow(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            TextButton(onClick = { selected = chapters.mapTo(hashSetOf()) { it.id } }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Select all") }
+                            TextButton(onClick = { queue(selected) }, enabled = selected.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Save ${selected.size}") }
+                            TextButton(onClick = { removing = chapters.filter { it.id in selected && it.cached } },
+                                enabled = chapters.any { it.id in selected && it.cached }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Remove saved") }
+                        }
+                    }
+                }
+                }
+            }
+            novel?.let { n ->
+                items(chapters, key = { it.id }) { c ->
+                    Box(Modifier.fillMaxWidth().background(Ink.Panel).padding(horizontal = 22.dp, vertical = 5.dp)) {
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Ink.Raised).clickable {
+                            if (selecting) selected = if (c.id in selected) selected - c.id else selected + c.id
+                            else context.startActivity(NovelReaderActivity.intent(context, n.id, c.id))
+                        }.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (selecting) Checkbox(c.id in selected, { selected = if (it) selected + c.id else selected - c.id })
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(c.name, color = Ink.Text, fontSize = 14.sp)
+                                val queued = downloadByChapter[c.id]
+                                Text(listOfNotNull(if (c.progression >= .999) "Read" else if (c.progression > 0) "${(c.progression * 100).toInt()}%" else "Unread",
+                                    if (c.downloaded) "Saved offline" else null,
+                                    queued?.let { when (it.state) { "downloading" -> "Downloading"; "queued" -> "Queued"; "retry" -> "Retry pending"; "failed" -> "Failed"; else -> null } },
+                                    if (c.bookmark) "Bookmarked" else null).joinToString(" · "), color = Ink.Muted, fontSize = 11.sp)
+                            }
+                            if (!selecting) TextButton(onClick = {
+                                when (downloadByChapter[c.id]?.state) {
+                                    "downloading", "queued" -> scope.launch { repository.cancel(c.id); reload() }
+                                    "retry", "failed" -> scope.launch { repository.retry(c.id); reload() }
+                                    else -> if (c.downloaded) removing = listOf(c) else queue(listOf(c.id))
+                                }
+                            }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                Text(when (downloadByChapter[c.id]?.state) { "downloading" -> "Cancel"; "queued" -> "Cancel"; "retry", "failed" -> "Retry"; else -> if (c.downloaded) "Remove" else "↓" })
+                            }
+                        }
+                    }
+                }
+                item(key = "detail-panel-end") {
+                    Spacer(Modifier.fillMaxWidth().height(18.dp).background(Ink.Panel))
+                }
             }
         }
     }

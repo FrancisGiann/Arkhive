@@ -100,7 +100,7 @@ private fun getThemeColorScheme(
         isDark = isDark,
         isAmoled = isAmoled,
         overrideDarkSurfaceContainers = appTheme != AppTheme.MONET,
-    )
+    ).withAccessiblePrimaryForegrounds()
 }
 
 private val colorSchemes: Map<AppTheme, BaseColorScheme> = mapOf(

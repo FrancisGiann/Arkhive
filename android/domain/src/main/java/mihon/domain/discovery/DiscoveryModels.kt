@@ -15,6 +15,7 @@ data class CatalogLoad(val feed: CatalogFeed?, val cached: Boolean = false, val 
 enum class CatalogFocus(val label: String, val subject: String?) {
     MANGA("Manga", "manga"), MANHWA("Manhwa", "manhwa"), MANHUA("Manhua", "manhua"),
     NOVELS("Light novels", "light_novels"), BOOKS("Fiction", "fiction"), ALL("All books", null),
+    COMICS("Comics", "comics"),
 }
 enum class CatalogGenre(val label: String, val subject: String?) {
     ANY("All genres", null), FANTASY("Fantasy", "fantasy"), ADVENTURE("Adventure", "adventure"),

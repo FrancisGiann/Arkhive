@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import mihon.app.di.appGraph
+import eu.kanade.presentation.theme.prefersDarkSystemBarIcons
 
 /** App-scoped visual tokens backed by the selected app palette. */
 object Ink {
@@ -101,7 +102,7 @@ fun InkStatusBarStyle(statusBarColor: Color) {
         }
     }
     SideEffect {
-        controller?.isAppearanceLightStatusBars = statusBarColor.luminance() > 0.5f
+        controller?.isAppearanceLightStatusBars = prefersDarkSystemBarIcons(statusBarColor)
     }
 }
 

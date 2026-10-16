@@ -20,6 +20,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -40,6 +42,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.surfaceColorAtElevation
@@ -732,6 +735,7 @@ fun MangaScreenLargeImpl(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun MangaDiscoveryAndMetadata(
     manga: Manga,
     onDiscoverRelated: () -> Unit,
@@ -749,11 +753,14 @@ private fun MangaDiscoveryAndMetadata(
             verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp),
         ) {
             Column(
-                Modifier.fillMaxWidth().inkPress(onDiscoverRelated).padding(bottom = 2.dp),
+                Modifier.fillMaxWidth().padding(bottom = 2.dp),
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
             ) {
                 Text("DISCOVER", color = Ink.Text, style = Ink.Display.copy(fontSize = 20.sp, lineHeight = 25.sp))
-                Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)) {
+                FlowRow(
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+                ) {
                     context.matchedLabels.forEach { label ->
                         Text(
                             label,
@@ -764,6 +771,12 @@ private fun MangaDiscoveryAndMetadata(
                     }
                 }
                 Text(context.provenance, color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+            }
+            Button(
+                onClick = onDiscoverRelated,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) {
+                Text("Explore related titles", style = MaterialTheme.typography.labelLarge)
             }
             Column(Modifier.fillMaxWidth()) {
                 Text("Synopsis & tags", color = Ink.Text, style = MaterialTheme.typography.titleSmall)

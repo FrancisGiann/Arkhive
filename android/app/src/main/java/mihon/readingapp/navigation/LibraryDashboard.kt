@@ -59,6 +59,7 @@ import mihon.readingapp.books.BookImportState
 import mihon.readingapp.books.BookImportStatusPanel
 import mihon.readingapp.books.BooksShelf
 import mihon.readingapp.design.*
+import mihon.readingapp.discovery.MangaContentClassification
 import mihon.readingapp.fixtures.OriginalDemoSource
 import mihon.readingapp.library.ShelfAssignment
 import mihon.readingapp.library.ShelfStatus
@@ -160,7 +161,7 @@ private data class ShelfStory(val key: String, val title: String, val author: St
         manga.map { item -> ShelfStory("manga:${item.id}",
             if (item.manga.source in listOf(OriginalDemoSource.MANGA_ID, OriginalDemoSource.WEBTOON_ID)) item.manga.title.substringBefore(" · Original demo") else item.manga.title,
             item.manga.author.orEmpty(),
-            if (item.manga.source == OriginalDemoSource.WEBTOON_ID) "Webtoon" else "Manga", item.manga,
+            MangaContentClassification.fromGenres(item.manga.genre).label, item.manga,
             if (item.totalChapters > 0) (item.readCount.toFloat()/item.totalChapters).coerceIn(0f,1f) else 0f,
             "${item.readCount} / ${item.totalChapters} chapters read", item.lastRead?.toEpochMilliseconds() ?: 0, mangaId = item.id) } +
             books.map { book -> ShelfStory("book:${book.id}", book.title, book.author ?: "Local file", book.format.name,
@@ -307,7 +308,9 @@ private data class ShelfStory(val key: String, val title: String, val author: St
                 if (searchOpen) OutlinedTextField(query,{query=it},placeholder={Text("Title or author")},singleLine=true,modifier=Modifier.fillMaxWidth())
                 Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        listOf("All","Novels","Manga").forEach { value -> InkPill(value, if(value=="All") filter in setOf("All","PDFs","In progress") else filter==value) { selectDashboard(value) } }
+                        listOf("All" to "All", "Novels" to "Novels", "Comics" to "Manga").forEach { (label, value) ->
+                            InkPill(label, if(value=="All") filter in setOf("All","PDFs","In progress") else filter==value) { selectDashboard(value) }
+                        }
                     }
                     val activeFilterCount=(if(filter in setOf("PDFs","In progress")) 1 else 0)+(if(collection.isNotEmpty()) 1 else 0)
                     InkIcon(MaterialSymbols.Rounded.FilterList,if(activeFilterCount==0) "Filters" else "Filters, $activeFilterCount active") { filtersOpen=true }
@@ -362,7 +365,7 @@ private data class ShelfStory(val key: String, val title: String, val author: St
         }
         item(span={GridItemSpan(maxLineSpan)}) {
             Row(Modifier.fillMaxWidth().height(24.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
-                InkKicker(if(filter=="All") "On your shelf" else filter)
+                InkKicker(if(filter=="All") "On your shelf" else if(filter=="Manga") "Comics" else filter)
                 if (visible.isNotEmpty()) TextButton(onClick={navigator.push(LibraryToolsScreen(false))},contentPadding=PaddingValues(horizontal=4.dp,vertical=0.dp),modifier=Modifier.requiredHeight(48.dp)) {Text("View all",color=Ink.Link,fontSize=11.sp)}
             }
         }

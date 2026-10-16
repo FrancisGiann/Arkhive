@@ -1,10 +1,10 @@
 package mihon.readingapp.discovery
 
-import mihon.domain.discovery.CatalogFocus
 import mihon.domain.discovery.CatalogGenre
 import mihon.domain.discovery.CatalogQuery
 import mihon.domain.discovery.CatalogWindow
 import tachiyomi.domain.manga.model.Manga
+import java.util.Locale
 
 data class MangaDiscoveryContext(
     val title: String,
@@ -18,12 +18,9 @@ object MangaDiscoveryPolicy {
 
     fun forMetadata(title: String, genres: List<String>?): MangaDiscoveryContext {
         val tags = genres.orEmpty().map(String::trim).filter(String::isNotEmpty)
-        val normalized = tags.map { it.lowercase().replace('-', ' ') }
-        val focus = when {
-            normalized.any { it == "manhwa" } -> CatalogFocus.MANHWA
-            normalized.any { it == "manhua" } -> CatalogFocus.MANHUA
-            else -> CatalogFocus.MANGA
-        }
+        val normalized = tags.map { it.lowercase(Locale.ROOT).replace('-', ' ') }
+        val classification = MangaContentClassification.fromGenres(tags)
+        val focus = classification.relatedFocus
         val genre = when {
             normalized.any { it == "fantasy" } -> CatalogGenre.FANTASY
             normalized.any { it == "adventure" } -> CatalogGenre.ADVENTURE
