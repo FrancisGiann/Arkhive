@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-feature android:name="tachiyomi.extension" android:required="false" />
+    <!-- No INTERNET permission, activities, services, receivers, provider, or third-party content. -->
+    <application android:label="Tachiyomi: ReadingApp Controlled Fixture" android:hasCode="true">
+        <meta-data android:name="tachiyomi.extension.class" android:value="${sourceClass}" />
+        <meta-data android:name="tachiyomix.name" android:value="ReadingApp controlled original fixture" />
+        <meta-data android:name="tachiyomix.contentWarning" android:value="0" />
+    </application>
+</manifest>

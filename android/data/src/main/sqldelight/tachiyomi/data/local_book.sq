@@ -1,0 +1,47 @@
+CREATE TABLE local_book (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT,
+    format TEXT NOT NULL,
+    asset_file TEXT NOT NULL,
+    original_file TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    fingerprint TEXT NOT NULL UNIQUE,
+    file_bytes INTEGER NOT NULL,
+    cover_file TEXT,
+    added_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    locator TEXT,
+    progression REAL NOT NULL DEFAULT 0
+);
+
+CREATE INDEX local_book_updated_index ON local_book(updated_at DESC);
+
+books:
+SELECT * FROM local_book ORDER BY updated_at DESC, title COLLATE NOCASE;
+
+book:
+SELECT * FROM local_book WHERE id = :id;
+
+byFingerprint:
+SELECT * FROM local_book WHERE fingerprint = :fingerprint;
+
+insertBook:
+INSERT INTO local_book(id, title, author, format, asset_file, original_file, original_name, fingerprint,
+ file_bytes, cover_file, added_at, updated_at, locator, progression)
+VALUES (:id, :title, :author, :format, :asset_file, :original_file, :original_name, :fingerprint,
+ :file_bytes, :cover_file, :added_at, :updated_at, :locator, :progression);
+
+saveProgress:
+UPDATE local_book SET locator = :locator, progression = :progression, updated_at = :updated_at WHERE id = :id;
+
+restoreMetadata:
+UPDATE local_book SET title = :title, author = :author, original_name = :original_name,
+ file_bytes = :file_bytes, added_at = :added_at, updated_at = :updated_at,
+ locator = :locator, progression = :progression WHERE id = :id;
+
+renameBook:
+UPDATE local_book SET title = :title WHERE id = :id;
+
+removeBook:
+DELETE FROM local_book WHERE id = :id;

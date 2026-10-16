@@ -1,0 +1,22 @@
+# Modified for the private ReadingApp prototype; see READINGAPP-PROTOTYPE.md.
+# Build files
+.gradle
+.kotlin
+build
+
+# IDE files
+*.iml
+.idea/*
+!.idea/icon.svg
+/captures
+
+# Configuration files
+keystore.properties
+local.properties
+
+# macOS specific files
+.DS_Store
+
+# ReadingApp isolated tooling, signing and build evidence
+.readingapp-cache/
+.readingapp-tools/

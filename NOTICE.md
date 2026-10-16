@@ -7,3 +7,5 @@ Local EPUB/text reading uses Readium Kotlin Toolkit 3.4.0 under BSD-3-Clause; th
 Bundled Noto fonts retain their SIL Open Font License in licenses/NOTO-OFL.txt. Original sample art and text shown in screenshots are explicitly authored test fixtures.
 
 No affiliation with the upstream projects or universal external-source compatibility is claimed.
+
+The 0.4.5 implementation source is published in android/. Bundled LNReader contract helpers and pinned third-party components retain MIT/ISC and related notices in android/app/src/main/assets/lnreader/THIRD-PARTY-NOTICES.txt and its licenses directory. Arkhive's modifications are described in android/READINGAPP-PROTOTYPE.md.

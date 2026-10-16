@@ -1,0 +1,31 @@
+-- Add independent book assets/locators; existing manga, chapters and source IDs are untouched.
+CREATE TABLE local_book (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT,
+    format TEXT NOT NULL,
+    asset_file TEXT NOT NULL,
+    original_file TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    fingerprint TEXT NOT NULL UNIQUE,
+    file_bytes INTEGER NOT NULL,
+    cover_file TEXT,
+    added_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    locator TEXT,
+    progression REAL NOT NULL DEFAULT 0
+);
+
+CREATE INDEX local_book_updated_index ON local_book(updated_at DESC);
+
+CREATE TABLE book_bookmark (
+    id TEXT NOT NULL PRIMARY KEY,
+    book_id TEXT NOT NULL,
+    locator TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(book_id) REFERENCES local_book(id) ON DELETE CASCADE
+);
+
+CREATE INDEX book_bookmark_book_index ON book_bookmark(book_id, created_at DESC);
+

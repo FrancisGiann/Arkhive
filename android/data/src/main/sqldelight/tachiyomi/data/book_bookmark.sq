@@ -1,0 +1,20 @@
+CREATE TABLE book_bookmark (
+    id TEXT NOT NULL PRIMARY KEY,
+    book_id TEXT NOT NULL,
+    locator TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(book_id) REFERENCES local_book(id) ON DELETE CASCADE
+);
+
+CREATE INDEX book_bookmark_book_index ON book_bookmark(book_id, created_at DESC);
+
+bookmarks:
+SELECT * FROM book_bookmark WHERE book_id = :book_id ORDER BY created_at DESC;
+
+addBookmark:
+INSERT OR IGNORE INTO book_bookmark(id, book_id, locator, label, created_at)
+VALUES (:id, :book_id, :locator, :label, :created_at);
+
+removeBookmark:
+DELETE FROM book_bookmark WHERE id = :id;

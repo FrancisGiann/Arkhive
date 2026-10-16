@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Non-exported, narrow fixture URI surface for controlled debug-only import tests. -->
+        <provider android:name="mihon.readingapp.books.BookFixtureProvider"
+            android:authorities="${applicationId}.bookfixtures"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/book_fixture_paths"/>
+        </provider>
+    </application>
+</manifest>

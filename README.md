@@ -2,9 +2,9 @@
 
 A cover-led Android reader for manga, manhwa, manhua, online novels, and local EPUB/PDF/text. Arkhive retains Mihon's native image reader and source host, with Readium for reflowable books.
 
-**Current preview: 0.4.4.** This is a universal debug APK, not a production release.
+**Current preview: 0.4.5.** This is a universal debug APK, not a production release.
 
-[Download Arkhive-0.4.4.apk](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.4/Arkhive-0.4.4.apk) · [Release notes](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.4) · [SHA-256 file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.4/Arkhive-0.4.4.sha256)
+[Download Arkhive-0.4.5.apk](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.5/Arkhive-0.4.5.apk) · [Release notes](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.5) · [SHA-256 file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.5/Arkhive-0.4.5.sha256)
 
 ## Install or update
 
@@ -12,15 +12,15 @@ A cover-led Android reader for manga, manhwa, manhua, online novels, and local E
 2. Open the APK on Android. If prompted, allow installation from the browser or file manager used for this download.
 3. To update the existing Arkhive preview, install over it. The package and signing certificate are unchanged; keep the existing installation to retain its data.
 
-Internal version: **0.4.4-1**, version code **11**. Package: `dev.francisgiann.readingapp.dev`. The universal APK includes ARM64, ARMv7, x86 and x86_64 libraries. Size: **103,317,859 bytes**.
+Internal version: **0.4.5-1**, version code **12**. Package: `dev.francisgiann.readingapp.dev`. The universal APK includes ARM64, ARMv7, x86 and x86_64 libraries. Size: **102,201,109 bytes**.
 
 SHA-256:
 
 ~~~text
-d288d2a30d4043868adf5004478ff906a240dd06c613578340753975e3870548
+3aea0cb98b6bd80290ff0e019200b80feb503c70f950aa727782b3757c3f6a8c
 ~~~
 
-The previous [0.4.3 prerelease](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.3) remains available. Check each release's notes before changing versions.
+The previous [0.4.4 preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.4) remains available with its original APK and checksum. Check each release's notes before changing versions.
 
 ## Reading
 
@@ -30,15 +30,14 @@ The previous [0.4.3 prerelease](https://github.com/FrancisGiann/Arkhive/releases
 - **Local imports:** EPUB, PDF and text, with import progress, exact-duplicate recognition and saved bookmarks/progress.
 - **Library:** All / Novels / Manga tabs, persistent clearable filters, shelves/status, per-story reading profiles, chapter inbox, reviewed source migration, local metadata backup/restore, hidden-library reveal, static Reading Rooms and optional local reading statistics. Buying stays in a separate tab.
 
-## New in 0.4.4
+## New in 0.4.5
 
-- **Theme consistency:** selected palettes propagate through app surfaces and reader controls, with Light/Dark/System updates and contrast fixes. Per-title reading paper remains separate.
-- **Clearer actions:** outlined Settings shortcuts and surfaced Series tools rows.
-- **Add to shelf:** shared additive selection preserves existing memberships and reading status; new shelves stay drafts until Save.
-- **Title metadata:** synopsis and tags use available source/import metadata; manga detail titles have bounded responsive typography.
-- **Reader center taps:** EPUB and online-novel controls toggle without repaginating or moving the passage in Pages/Continuous layouts.
+- **Original Discover panel design:** restored the full-width panel with rounded top corners below the cover header. Tapping Discover opens actual category/genre catalog matches with context, filters and a direct Back path. Synopsis and tags remain below the panel's discovery controls.
+- **Long titles:** responsive stacked layout keeps words intact at narrow widths and enlarged text, with bounded ellipsis and the full accessible title.
+- **Online novel status:** loading and errors are centered inside the reading area, clear of measured header/footer controls, without moving the loaded passage.
+- **Exact-origin review:** paste an HTTPS page/source URL and review its exact host and port. A source's observed blocked cover host can be selected explicitly. Existing HTTPS/network restrictions and the separate Trust confirmation remain in place.
 
-The 0.4.3 adjacent-chapter preload, contextual Return, live typography preview and offline-status indicators remain included.
+The 0.4.4 theme propagation, Light/Dark/System support, per-title paper preferences, shelf selection and reader center-tap improvements remain included.
 
 ## Online sources and offline reading
 
@@ -50,21 +49,25 @@ Discovery uses real Open Library catalog matches and supported source trend wind
 
 ## Preview validation and limits
 
-**92 JVM tests across 16 suites passed** before the final visual-only 1 dp shortcut outline; the final APK compiled that adjustment successfully. Focused API 35 x86_64 emulator runs covered EPUB/online-novel passage and locator preservation, narrow width and enlarged text, metadata, library/settings persistence, and rendered default/Catppuccin Light/Dark/System examples. Final APK manual checks covered Tools, shelf draft/cancel/save/reopen/cleanup and the outlined shortcuts. These are focused checks, not one passing full Android suite or exhaustive coverage of every palette and surface.
+All **14 focused JVM tests passed** for discovery mapping, library tools, reader status and origin normalization. Focused API 35 x86_64 emulator checks verified the restored panel in Light/Dark, contextual Discover and Back, and a 119-character title at approximately 274dp width with 130% font. The full long word remains intact and the complete title is accessible.
 
-A synthetic long-title check at approximately 274 dp width and 130% font showed bounded text and an accessible full title, but a long uppercase word still split awkwardly across lines. This wrapping defect needs a later patch; 0.4.4 assets are unchanged. The broader saved-copy removal UI case was not reverified here; see the 0.4.3 release notes for its earlier failed selector case.
+Reader loading/loaded/empty-source error/Retry bounds and Pages/Continuous center-tap passage preservation passed before the final panel-only styling adjustment. Those unchanged reader paths were not redundantly rerun afterward. This is scoped validation, not an exhaustive Android test suite.
 
-Runtime checks used an API 35 x86_64 emulator. Physical-phone install/update, ARM execution, API 26/36 runtime, full TalkBack, long-session battery and sustained 120fps remain unverified. Native image-reader recreation restores chapter/logical page; the inherited webtoon reader may reset the pixel offset within one tall image. Single-image retry preserves its live viewport. See the release notes for the tested scope.
+The authored exact-origin fixture verified explicit observed-host selection, Cancel leaving permissions unchanged, and the rendered HTTP rejection with a greyed-out Trust control after ordinary dialog scrolling. HTTPS preview, persisted Trust and cover retry were **not completed end to end**: the automation inspected the text label rather than the disabled button's semantics, and a no-code-change debugger hold failed to attach. The four origin-normalization unit tests passed; they do not replace this unfinished UI check. No real extension permissions were changed.
+
+Physical-phone install/update, ARM execution, API 26/36 runtime, full TalkBack, long-session battery and sustained 120fps remain unverified. Native image-reader recreation restores chapter/logical page; the inherited webtoon reader may reset the pixel offset within one tall image. Single-image retry preserves its live viewport.
 
 ## Repository and credits
 
-This public repository contains release downloads, documentation, notices and authored sample screenshots. The application implementation and detailed QA archive remain private. GitHub's automatic **Source code** archives for these release tags contain this public repository; they **do not contain the private implementation used to build the APK** and are not a matching buildable 0.4.4 source release.
+The implementation source for **0.4.5 is published under [android/](android/)**, including the Gradle project, authored fixtures/tests and required license notices. The v0.4.5 tag points to the corresponding implementation snapshot. See [build instructions](android/README.md). Signing material, local build caches, credentials, user data and private QA archives are excluded.
+
+Earlier release tags through 0.4.4 predate source publication: their automatic **Source code** archives contain the then-public documentation repository, not a matching implementation source release. The APKs and checksums attached to those releases remain unchanged.
 
 Arkhive is based on [Mihon](https://github.com/mihonapp/mihon). Apache-2.0/Mihon, Readium BSD and Noto SIL OFL notices and upstream credits are retained in [NOTICE.md](NOTICE.md), [LICENSE](LICENSE) and [licenses](licenses).
 
 ## Sample screenshots
 
-These six existing screenshots show original, self-authored synthetic samples from the **0.4.0 preview**. They illustrate the app and do not document every 0.4.4 change.
+These six existing screenshots show original, self-authored synthetic samples from the **0.4.0 preview**. They illustrate the app and do not document every current change.
 
 | Library | Local chapters | Manga chapters |
 | --- | --- | --- |
@@ -74,3 +77,11 @@ These six existing screenshots show original, self-authored synthetic samples fr
 | --- | --- | --- |
 | ![Manga reader](docs/screenshots/manga-reader.png) | ![Webtoon reader](docs/screenshots/webtoon-reader.png) | ![Novel reader](docs/screenshots/novel-reader.png) |
 
+
+## Current panel screenshots
+
+These 0.4.5 emulator captures use the original authored Lantern Circuit fixture.
+
+| Light | Dark |
+| --- | --- |
+| ![Rounded Discover panel, Light](docs/screenshots/0.4.5/discover-light.png) | ![Rounded Discover panel, Dark](docs/screenshots/0.4.5/discover-dark.png) |

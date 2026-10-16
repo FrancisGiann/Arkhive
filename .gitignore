@@ -1,0 +1,13 @@
+# Local build and signing data
+**/.gradle/
+**/.kotlin/
+**/build/
+**/.readingapp-cache/
+**/.readingapp-tools/
+**/local.properties
+**/keystore.properties
+*.jks
+*.keystore
+*.apk
+*.aab
+.env
