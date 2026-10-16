@@ -30,6 +30,20 @@ The previous [0.4.4 preview](https://github.com/FrancisGiann/Arkhive/releases/ta
 - **Local imports:** EPUB, PDF and text, with import progress, exact-duplicate recognition and saved bookmarks/progress.
 - **Library:** All / Novels / Manga tabs, persistent clearable filters, shelves/status, per-story reading profiles, chapter inbox, reviewed source migration, local metadata backup/restore, hidden-library reveal, static Reading Rooms and optional local reading statistics. Buying stays in a separate tab.
 
+## Verified 0.4.6 follow-up — build not published here
+
+The next local build restores the approved full-width Discover panel with rounded top corners and adds one explicit **Explore related titles** button. Related category/genre results retain context and Back navigation; synopsis and tags remain separate.
+
+Library labels now use explicit Manga/Manhwa/Manhua metadata; unknown or conflicting metadata appears as Comics. Online novel details use natural-case accessible titles, compact metadata, responsive actions and a virtualized chapter list beneath a rounded panel. Theme foreground and status-bar icon contrast are corrected while preserving per-title reading-paper preferences.
+
+**Verified:** 20 distinct focused JVM checks passed across scoped builds. Final Light/Dark novel runtime checks passed on API35 x86_64, including a 119-character title at 130% font. Rendered Light purple/white title contrast measured 5.41:1; Dark pastel/dark title contrast measured 9.23:1. Manual checks covered the Manhwa Library label, Discover button → contextual results → Back, immediate palette changes, System following OS appearance, and persistence after app restart. Temporary fixtures were cleaned up and the emulator stopped.
+
+**Limits:** physical ARM devices, API26/36 runtime, full TalkBack, sustained frame rate and battery remain unverified. Chapter controls fit the tested initial viewport, so that runtime fixture did not actually swipe. **Kol Novel's `invalid source filter: genre[]` remains reference-only and is not fixed.** Installation does not guarantee compatibility with every community source.
+
+Local candidate: version **0.4.6-1**, code **13**, **102,217,490 bytes**, retained package and signer. SHA-256: `be77992724a61392308e7de69bbe8e12738e8f49bb630d713dccdc9ecafacd80`.
+
+The attached 0.4.5 APK and its source tag do not contain these follow-up changes. No 0.4.6 APK or implementation is published by this notes update.
+
 ## New in 0.4.5
 
 - **Original Discover panel design:** restored the full-width panel with rounded top corners below the cover header. Tapping Discover opens actual category/genre catalog matches with context, filters and a direct Back path. Synopsis and tags remain below the panel's discovery controls.
