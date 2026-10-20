@@ -2,9 +2,9 @@
 
 A cover-led Android reader for manga, manhwa, manhua, online novels, and local EPUB/PDF/text. Arkhive retains Mihon's native image reader and source host, with Readium for reflowable books.
 
-**Current preview: 0.4.6.** This is a universal debug APK, not a production release.
+**Current preview: 0.4.8.** This is a universal debug APK, not a production release.
 
-[Download Arkhive-0.4.6.apk](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.6/Arkhive-0.4.6.apk) · [Release notes](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.6) · [SHA-256 file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.6/Arkhive-0.4.6.sha256)
+[Download arkhive-0.4.8.apk](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.8/arkhive-0.4.8.apk) · [Release notes](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.8) · [SHA-256 file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.8/arkhive-0.4.8.apk.sha256)
 
 ## Install or update
 
@@ -12,12 +12,12 @@ A cover-led Android reader for manga, manhwa, manhua, online novels, and local E
 2. Open the APK on Android. If prompted, allow installation from the browser or file manager used for this download.
 3. To update the existing Arkhive preview, install over it. The package and signing certificate are unchanged; keep the existing installation to retain its data.
 
-Internal version: **0.4.6-1**, version code **13**. Package: `dev.francisgiann.readingapp.dev`. The universal APK includes ARM64, ARMv7, x86 and x86_64 libraries. Size: **102,217,490 bytes**.
+Internal version: **0.4.8-1**, version code **15**. Package: `dev.francisgiann.readingapp.dev`. The universal APK includes ARM64, ARMv7, x86 and x86_64 libraries. Size: **101,608,350 bytes**.
 
 SHA-256:
 
 ~~~text
-be77992724a61392308e7de69bbe8e12738e8f49bb630d713dccdc9ecafacd80
+debaa5e735eb9ff81b1c740775edb7f5b7a7219e7f3213ff71ce613a1f02afa2
 ~~~
 
 The previous [0.4.4 preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.4) remains available with its original APK and checksum. Check each release's notes before changing versions.
@@ -32,6 +32,8 @@ The previous [0.4.4 preview](https://github.com/FrancisGiann/Arkhive/releases/ta
 
 ## Changes
 
+- Isolated JavaScript startup now recovers after a cancelled support check, with fresh sandbox execution and explicit trust/origin limits retained. Includes the reviewed0.4.7 zoom/scroll fixes and compact Explore action; the exact partial zoom-out/scroll sequence is now covered.
+
 - Retains the approved full-width Discover panel with rounded top corners below the cover, with one explicit **Explore related titles** button. Related category/genre results retain context and Back navigation; synopsis/tags remain separate.
 - Library labels use explicit Manga/Manhwa/Manhua metadata. Unknown or conflicting metadata is shown as Comics; source language or website does not determine nationality. The broad Library filter is now labelled Comics.
 - Online novel details use a natural-case accessible title, compact metadata, responsive actions and a virtualized chapter list beneath a rounded panel.
@@ -39,14 +41,11 @@ The previous [0.4.4 preview](https://github.com/FrancisGiann/Arkhive/releases/ta
 
 ## Verified and limits
 
-**20 distinct focused JVM checks passed** across three scoped builds: discovery/classification5, Library tools5, reader status2, origin normalization4, foreground/status contrast4. Final Light/Dark novel runtime tests passed on API35 x86_64 (13.689s/13.396s), including a 119-character title at 130% font. Actual rendered Light purple/white title contrast measured5.41:1; Dark pastel/dark title9.23:1 and dark status icons were verified.
+**0.4.8:** seven focused JVM lifecycle tests and six scoped API35 x86_64 runtime methods passed. Frozen0.4.7 reproduced the reported isolated JavaScript bind error;0.4.8 passed cancellation/reconnect, repeated execution, timeout recovery and explicit trust/origin UI checks. Native partial zoom-out then forward/reverse scrolling passed in all three strip/vertical configurations, with21 actual captured frames showing painted synthetic content and no black frame in the covered sequence.
 
-Manual UI checks verified Manhwa Library caption, rounded Discover panel, explicit button → contextual Manhwa/Fantasy results → Back, immediate palette changes, System following OS appearance, and selection persistence after force-stop/reopen. Temporary fixtures were cleaned up and the emulator stopped. These are scoped checks, not a full Android suite. The chapter controls fit the tested initial viewport; no actual swipe occurred in that runtime fixture.
+Physical-phone behavior remains unverified. Community sources, artwork sharpness, sustained performance/battery and other device/API/architecture runtimes are not established by these authored checks. **Kol Novel's `invalid source filter: genre[]` remains reference-only and is not fixed.**
 
-Physical ARM devices, API26/36 runtime, full TalkBack, sustained frame rate and battery remain unverified. **Kol Novel's `invalid source filter: genre[]` remains reference-only and is not fixed in this release.** Installation does not guarantee compatibility with every community source.
-
-
-[Full 0.4.6 release notes](docs/releases/0.4.6.md).
+[Full0.4.8 notes and download integrity](docs/releases/0.4.8.md). Earlier [0.4.6 UI/theme verification](docs/releases/0.4.6.md) remains documented separately.
 
 ## Online sources and offline reading
 
@@ -58,13 +57,11 @@ Discovery uses real Open Library catalog matches and supported source trend wind
 
 ## Preview validation and limits
 
-See the [0.4.6 verification and limits](docs/releases/0.4.6.md#verified-and-limits) above: 20 distinct focused JVM checks and final Light/Dark runtime checks passed. Physical devices and measured sustained performance remain unverified.
-
-The frozen 0.4.5 origin workflow subsequently received manual fixture verification of HTTP rejection, Cancel without permission changes, exact observed-host Trust persistence and successful cover retry/cache bytes. Those observations span two authored sessions; they are not one passing automated end-to-end test. No real extension permissions were changed.
+See [0.4.8 verification and limits](docs/releases/0.4.8.md#verified). The provider-startup repair and exact emulator zoom/scroll sequence are verified; physical-phone behavior remains unverified. Existing saved reading progress and per-title paper preferences are retained.
 
 ## Repository and credits
 
-The implementation source for **0.4.6 is published under [android/](android/)**, including the Gradle project, authored fixtures/tests and required license notices. The v0.4.6 tag points to the corresponding implementation snapshot. See [build instructions](android/README.md). Signing material, local build caches, credentials, user data and private QA archives are excluded.
+The implementation source for **0.4.6 is published under [android/](android/)**, including the Gradle project, authored fixtures/tests and required license notices. The v0.4.8 tag points to the corresponding implementation snapshot. See [build instructions](android/README.md). Signing material, local build caches, credentials, user data and private QA archives are excluded.
 
 Earlier release tags through 0.4.4 predate source publication: their automatic **Source code** archives contain the then-public documentation repository, not a matching implementation source release. The APKs and checksums attached to those releases remain unchanged.
 

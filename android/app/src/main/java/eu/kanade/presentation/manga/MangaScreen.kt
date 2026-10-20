@@ -42,7 +42,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.surfaceColorAtElevation
@@ -772,11 +772,12 @@ private fun MangaDiscoveryAndMetadata(
                 }
                 Text(context.provenance, color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
             }
-            Button(
+            OutlinedButton(
                 onClick = onDiscoverRelated,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                modifier = Modifier.align(Alignment.Start).heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                Text("Explore related titles", style = MaterialTheme.typography.labelLarge)
+                Text("Explore related titles", style = MaterialTheme.typography.labelSmall)
             }
             Column(Modifier.fillMaxWidth()) {
                 Text("Synopsis & tags", color = Ink.Text, style = MaterialTheme.typography.titleSmall)

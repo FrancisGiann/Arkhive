@@ -1,7 +1,11 @@
 package mihon.readingapp.readers
 
+import android.graphics.Point
 import android.graphics.PointF
 import android.graphics.Rect
+import android.util.Log
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.View
 import android.view.ViewGroup
 import androidx.test.core.app.ActivityScenario
@@ -55,6 +59,7 @@ class LongPageRuntimeTest {
         disableZoomOut: Boolean = true,
         cropPaged: Boolean = false,
         cropWebtoon: Boolean = false,
+        wideFixture: Boolean = false,
         body: suspend (ActivityScenario<ReaderActivity>, Long) -> Unit,
     ) {
         val nonce = UUID.randomUUID().toString()
@@ -62,7 +67,9 @@ class LongPageRuntimeTest {
         val chapterPath = "/$slug/chapter/1"
         val path = "$chapterPath?qa=$nonce"
         val urls = OriginalDemoCatalog.pageUrls(chapterPath).map { "$it&qa=$nonce" }
-        val data = instrumentation.context.assets.open("reader/extreme-tall.png").use { it.readBytes() }
+        val data = instrumentation.context.assets.open(
+            if (wideFixture) "reader/wide-extreme-tall.png" else "reader/extreme-tall.png",
+        ).use { it.readBytes() }
         val prefs = graph.readerPreferences
         val restores = mutableListOf<() -> Unit>()
         fun <T> temporarily(preference: tachiyomi.core.common.preference.Preference<T>, value: T) {
@@ -112,6 +119,273 @@ class LongPageRuntimeTest {
         assertEquals("Viewer starts at the reader's left edge",readerPosition[0],viewerPosition[0])
         assertEquals("Viewer reaches the reader's right edge",readerPosition[0]+reader.width,viewerPosition[0]+viewer.width)
     }
+
+    private fun dispatchNativePinch(
+        activity: ReaderActivity,
+        zoomIn: Boolean,
+        terminalSpanFraction: Float? = null,
+    ) {
+        val viewport = (activity.viewModel.state.value.viewer as WebtoonViewer).getView()
+        dispatchNativePinch(activity, viewport, zoomIn, terminalSpanFraction)
+    }
+
+    /** Send two fingers through the native Activity dispatch path for either vertical viewer. */
+    private fun dispatchNativePinch(
+        activity: ReaderActivity,
+        viewport: View,
+        zoomIn: Boolean,
+        terminalSpanFraction: Float? = null,
+    ) {
+        val frame = viewport
+        val location = IntArray(2)
+        frame.getLocationInWindow(location)
+        val centerX = location[0] + frame.width / 2f
+        val centerY = location[1] + frame.height * 0.55f
+        val minScaleSpan = ViewConfiguration.get(activity).scaledMinimumScalingSpan.toFloat()
+        val fitSpan = frame.width * 0.48f
+        val zoomSpan = frame.width * 0.90f
+        require(terminalSpanFraction == null || !zoomIn && terminalSpanFraction in 0.50f..0.90f)
+        check(fitSpan > minScaleSpan) {
+            "Frame-derived pinch span $fitSpan must exceed platform minimum scaling span $minScaleSpan (frame=${frame.width})"
+        }
+        Log.i("ArkhiveZoomQA", "PINCH_GEOMETRY frame=${frame.width}x${frame.height},minSpan=$minScaleSpan,fitSpan=$fitSpan,zoomSpan=$zoomSpan")
+        val downTime = android.os.SystemClock.uptimeMillis()
+        var elapsed = 0L
+
+        fun send(action: Int, span: Float, pointerCount: Int) {
+            val properties = Array(pointerCount) { index ->
+                MotionEvent.PointerProperties().apply { id = index; toolType = MotionEvent.TOOL_TYPE_FINGER }
+            }
+            val coordinates = Array(pointerCount) { index ->
+                MotionEvent.PointerCoords().apply {
+                    x = centerX + if (index == 0) -span / 2f else span / 2f
+                    y = centerY
+                    pressure = 1f
+                    size = 1f
+                }
+            }
+            val event = MotionEvent.obtain(
+                downTime, downTime + elapsed, action, pointerCount, properties, coordinates,
+                0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0,
+            )
+            try { activity.dispatchTouchEvent(event) } finally { event.recycle() }
+            elapsed += 16
+        }
+
+        val startSpan = if (zoomIn) fitSpan else zoomSpan
+        val spans = when {
+            zoomIn -> listOf(frame.width * 0.62f, frame.width * 0.76f, zoomSpan)
+            terminalSpanFraction != null -> listOf(
+                frame.width * 0.82f,
+                frame.width * 0.76f,
+                frame.width * terminalSpanFraction,
+            )
+            else -> listOf(frame.width * 0.76f, frame.width * 0.62f, fitSpan)
+        }
+        send(MotionEvent.ACTION_DOWN, startSpan, 1)
+        send(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), startSpan, 2)
+        spans.forEach { send(MotionEvent.ACTION_MOVE, it, 2) }
+        send(MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), spans.last(), 2)
+        send(MotionEvent.ACTION_UP, spans.last(), 1)
+    }
+
+    private fun dispatchNativeDrag(activity: ReaderActivity) {
+        val viewport = (activity.viewModel.state.value.viewer as WebtoonViewer).getView()
+        dispatchNativeDrag(activity, viewport)
+    }
+
+    /** A fresh one-finger scroll/pan after the pinch stream has ended. */
+    private fun dispatchNativeDrag(activity: ReaderActivity, viewport: View, moveUp: Boolean = true) {
+        val location = IntArray(2)
+        viewport.getLocationInWindow(location)
+        val x = location[0] + viewport.width / 2f
+        val startY = location[1] + viewport.height * (if (moveUp) 0.68f else 0.43f)
+        val endY = location[1] + viewport.height * (if (moveUp) 0.43f else 0.68f)
+        val downTime = android.os.SystemClock.uptimeMillis()
+        fun send(action: Int, y: Float, elapsed: Long) {
+            val event = MotionEvent.obtain(downTime, downTime + elapsed, action, x, y, 0)
+            try { activity.dispatchTouchEvent(event) } finally { event.recycle() }
+        }
+        send(MotionEvent.ACTION_DOWN, startY, 0)
+        send(MotionEvent.ACTION_MOVE, startY + (endY - startY) * 0.4f, 100)
+        send(MotionEvent.ACTION_MOVE, startY + (endY - startY) * 0.8f, 200)
+        send(MotionEvent.ACTION_UP, endY, 300)
+    }
+
+    private data class InjectedTouchTarget(
+        val centerX: Float,
+        val centerY: Float,
+        val width: Int,
+        val height: Int,
+        val minimumScaleSpan: Float,
+    )
+
+    private fun injectedTouchTarget(activity: ReaderActivity, view: View): InjectedTouchTarget {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        return InjectedTouchTarget(
+            centerX = location[0] + view.width / 2f,
+            centerY = location[1] + view.height / 2f,
+            width = view.width,
+            height = view.height,
+            minimumScaleSpan = ViewConfiguration.get(activity).scaledMinimumScalingSpan.toFloat(),
+        )
+    }
+
+    /**
+     * Inject through Android's input dispatcher. Calling Activity.dispatchTouchEvent directly
+     * bypasses the native window/input path that a real reader gesture uses.
+     */
+    private fun dispatchInjectedPinch(
+        target: InjectedTouchTarget,
+        zoomIn: Boolean,
+        terminalSpanFraction: Float? = null,
+    ) {
+        val width = target.width.toFloat()
+        val startSpan = if (zoomIn) width * 0.48f else width * 0.90f
+        require(terminalSpanFraction == null || !zoomIn && terminalSpanFraction in 0.50f..0.90f)
+        val spans = when {
+            zoomIn -> listOf(width * 0.62f, width * 0.76f, width * 0.90f)
+            terminalSpanFraction != null -> listOf(
+                width * 0.82f,
+                width * 0.76f,
+                width * terminalSpanFraction,
+            )
+            else -> listOf(width * 0.76f, width * 0.62f, width * 0.48f)
+        }
+        check(startSpan > target.minimumScaleSpan) {
+            "Pinch span " + startSpan + " must exceed Android minimum " + target.minimumScaleSpan
+        }
+        val downTime = android.os.SystemClock.uptimeMillis()
+        fun send(action: Int, span: Float, pointerCount: Int) {
+            val properties = Array(pointerCount) { index ->
+                MotionEvent.PointerProperties().apply { id = index; toolType = MotionEvent.TOOL_TYPE_FINGER }
+            }
+            val coordinates = Array(pointerCount) { index ->
+                MotionEvent.PointerCoords().apply {
+                    x = target.centerX + if (index == 0) -span / 2f else span / 2f
+                    y = target.centerY
+                    pressure = 1f
+                    size = 1f
+                }
+            }
+            val event = MotionEvent.obtain(
+                downTime,
+                android.os.SystemClock.uptimeMillis(),
+                action,
+                pointerCount,
+                properties,
+                coordinates,
+                0,
+                0,
+                1f,
+                1f,
+                0,
+                0,
+                android.view.InputDevice.SOURCE_TOUCHSCREEN,
+                0,
+            )
+            try {
+                instrumentation.sendPointerSync(event)
+            } finally {
+                event.recycle()
+            }
+            android.os.SystemClock.sleep(24)
+        }
+
+        send(MotionEvent.ACTION_DOWN, startSpan, 1)
+        send(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), startSpan, 2)
+        spans.forEach { send(MotionEvent.ACTION_MOVE, it, 2) }
+        send(MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), spans.last(), 2)
+        send(MotionEvent.ACTION_UP, spans.last(), 1)
+    }
+
+    private fun dispatchInjectedDrag(target: InjectedTouchTarget, moveUp: Boolean) {
+        val offset = target.height * 0.19f
+        val startY = target.centerY + if (moveUp) offset else -offset
+        val endY = target.centerY - if (moveUp) offset else -offset
+        val downTime = android.os.SystemClock.uptimeMillis()
+        fun send(action: Int, y: Float) {
+            val event = MotionEvent.obtain(
+                downTime,
+                android.os.SystemClock.uptimeMillis(),
+                action,
+                target.centerX,
+                y,
+                0,
+            ).apply { source = android.view.InputDevice.SOURCE_TOUCHSCREEN }
+            try {
+                instrumentation.sendPointerSync(event)
+            } finally {
+                event.recycle()
+            }
+            android.os.SystemClock.sleep(40)
+        }
+        send(MotionEvent.ACTION_DOWN, startY)
+        repeat(9) { step ->
+            send(MotionEvent.ACTION_MOVE, startY + (endY - startY) * (step + 1) / 9f)
+        }
+        send(MotionEvent.ACTION_UP, endY)
+    }
+
+    private fun verticalPagerImage(activity: ReaderActivity): SubsamplingScaleImageView? =
+        activity.findViewById<View>(android.R.id.content).all<PagerPageHolder>()
+            .firstOrNull { it.page.index == 0 && it.isShown }
+            ?.all<SubsamplingScaleImageView>()?.firstOrNull()
+
+    private fun verticalPagerDiagnostic(activity: ReaderActivity): String {
+        val state = activity.viewModel.state.value
+        val image = verticalPagerImage(activity)
+        val bounds = Rect()
+        val visible = image?.getGlobalVisibleRect(bounds) == true
+        val center = image?.center
+        return "viewer=" + (state.viewer?.javaClass?.simpleName ?: "none") +
+            ",page=" + state.currentPage +
+            ",focused=" + activity.window.decorView.hasWindowFocus() +
+            ",image=" + image?.width + "x" + image?.height +
+            ",ready=" + image?.isReady +
+            ",source=" + image?.sWidth + "x" + image?.sHeight +
+            ",scale=" + image?.scale + ",min=" + image?.minScale + ",max=" + image?.maxScale +
+            ",center=" + center?.x + "," + center?.y +
+            ",visible=" + visible + ":" + bounds.toShortString()
+    }
+
+    private suspend fun captureVerticalPagerStage(reader: ActivityScenario<ReaderActivity>, name: String) {
+        reader.onActivity { activity ->
+            Log.i("ArkhiveZoomQA", "CAPTURE:" + name + " " + verticalPagerDiagnostic(activity))
+        }
+        delay(2_000)
+    }
+
+    private suspend fun captureZoomStage(reader: ActivityScenario<ReaderActivity>, name: String) {
+        reader.onActivity { activity ->
+            val viewer = activity.viewModel.state.value.viewer
+            val recycler = (viewer as? WebtoonViewer)?.recycler
+            val strip = recycler?.all<WebtoonStripImageView>()?.firstOrNull { it.isShown && it.height > 50_000 }
+            val frame = activity.findViewById<View>(R.id.reader_container)
+            val frameBounds = Rect()
+            val frameVisible = frame?.getGlobalVisibleRect(frameBounds) == true
+            val recyclerBounds = Rect()
+            val recyclerOrigin = Point()
+            val recyclerVisible = recycler?.getGlobalVisibleRect(recyclerBounds, recyclerOrigin) == true
+            val stripBounds = Rect()
+            val stripOrigin = Point()
+            val stripVisible = strip?.getGlobalVisibleRect(stripBounds, stripOrigin) == true
+            val rawLocal = Rect()
+            val hasRawLocal = strip?.getLocalVisibleRect(rawLocal) == true
+            Log.i(
+                "ArkhiveZoomQA",
+                "CAPTURE:$name viewer=${viewer?.javaClass?.simpleName ?: "none"},page=${activity.viewModel.state.value.currentPage}," +
+                    "frame=${frameVisible}:${frameBounds.toShortString()}," +
+                    "recycler=${recyclerVisible}:${recyclerBounds.toShortString()}/origin=${recyclerOrigin}," +
+                    "size=${recycler?.width}x${recycler?.height},layoutHeight=${recycler?.layoutParams?.height}," +
+                    "scale=${recycler?.scaleX},translation=${recycler?.x},${recycler?.y}," +
+                    "strip=${strip?.width}x${strip?.height},visible=${stripVisible}:${stripBounds.toShortString()}/origin=${stripOrigin}," +
+                    "rawLocal=${hasRawLocal}:${rawLocal.toShortString()},tiles=${strip?.autoScrollDiagnosticState()}",
+            )
+        }
+        delay(2_000)
+    }
     @Test fun pagedVerticalStartsAtWidthAndStepsInsideImageBeforeNormalPage() = runBlocking {
         fixture(ReadingMode.VERTICAL) { reader, chapter ->
             await { var okay = false; reader.onActivity { a -> okay = a.findViewById<View>(android.R.id.content).all<PagerPageHolder>().any { it.page.index == 0 && it.isImageReadyForAutoScroll && it.isReadableLongPage } }; okay }
@@ -151,6 +425,533 @@ class LongPageRuntimeTest {
             delay(350)
             screenshot("Arkhive-tall-continuous-regions", checkCoverage=true)
             reader.onActivity { a -> val tile = a.findViewById<View>(android.R.id.content).all<WebtoonStripImageView>().first { it.isShown && it.height > 50000 }; assertTrue(tile.cachedBitmapBytes <= WebtoonStripImageView.MAX_CACHE_BYTES); assertTrue(tile.cachedTileCount < 16) }
+        }
+    }
+
+    @Test fun continuousTallImageSurvivesNativePinchReversalThenScroll() = runBlocking {
+        fixture(
+            mode = ReadingMode.WEBTOON,
+            sourceId = OriginalDemoSource.WEBTOON_ID,
+        disableZoomOut = true,
+            cropWebtoon = true,
+            wideFixture = true,
+        ) { reader, chapter ->
+            var expectedPage = 0
+            var lastDiagnostic = "not sampled"
+            var fitBeforePinchVisibleTop = 0
+
+            fun diagnostic(activity: ReaderActivity): String {
+                val state = activity.viewModel.state.value
+                val viewer = state.viewer as? WebtoonViewer
+                val strip = viewer?.recycler?.all<WebtoonStripImageView>()
+                    ?.firstOrNull { it.isShown && it.height > 50_000 }
+                val visible = Rect()
+                val hasVisible = strip?.getLocalVisibleRect(visible) == true
+                return "chapter=${state.currentChapter?.chapter?.id},page=${state.currentPage}," +
+                    "scale=${viewer?.recycler?.scaleX},offset=${viewer?.recycler?.computeVerticalScrollOffset()}," +
+                    "image=${strip?.width}x${strip?.height},clip=$hasVisible:${visible.toShortString()}," +
+                    "decode=${strip?.autoScrollDiagnosticState()}"
+            }
+
+            suspend fun awaitStage(stage: String, condition: () -> Boolean) {
+                try {
+                    await(stage, condition = condition)
+                } catch (failure: AssertionError) {
+                    reader.onActivity { activity ->
+                        lastDiagnostic = diagnostic(activity)
+                        Log.e("ArkhiveZoomQA", "FAIL:" + stage.replace(" ", "-") + " $lastDiagnostic", failure)
+                    }
+                    // Leave the live reader up briefly so the host can capture the failed frame.
+                    delay(2_000)
+                    throw failure
+                }
+            }
+
+            suspend fun assertStage(stage: String, passed: Boolean, message: String) {
+                if (!passed) {
+                    reader.onActivity { activity ->
+                        lastDiagnostic = diagnostic(activity)
+                        Log.e("ArkhiveZoomQA", "FAIL:" + stage.replace(" ", "-") + " $lastDiagnostic :: " + message)
+                    }
+                    // Leave the live failure frame available for a host-side adb capture.
+                    delay(2_000)
+                    throw AssertionError("$message; $lastDiagnostic")
+                }
+            }
+
+            suspend fun awaitDecoded(stage: String) {
+                awaitStage(stage) {
+                    var ready = false
+                    reader.onActivity { activity ->
+                        val state = activity.viewModel.state.value
+                        val viewer = state.viewer as? WebtoonViewer
+                        if (expectedPage == 0 && state.currentChapter?.chapter?.id == chapter && state.currentPage > 0) {
+                            expectedPage = state.currentPage
+                        }
+                        ready = viewer != null &&
+                            state.currentChapter?.chapter?.id == chapter &&
+                            expectedPage > 0 && state.currentPage == expectedPage &&
+                            viewer.recycler.all<WebtoonStripImageView>().any {
+                                it.isShown && it.height > 50_000 && it.hasDecodedImage
+                            }
+                        lastDiagnostic = diagnostic(activity)
+                    }
+                    ready
+                }
+            }
+
+            suspend fun captureStage(stage: String) {
+                reader.onActivity { activity ->
+                    val viewer = activity.viewModel.state.value.viewer as WebtoonViewer
+                    val strip = viewer.recycler.all<WebtoonStripImageView>()
+                        .first { it.isShown && it.height > 50_000 }
+                    val localVisible = Rect()
+                    val hasLocalVisible = strip.getLocalVisibleRect(localVisible)
+                    lastDiagnostic = diagnostic(activity)
+                    Log.i(
+                        "ArkhiveZoomQA",
+                        "CAPTURE:" + stage + " " + lastDiagnostic +
+                            " clip=" + hasLocalVisible + ":" + localVisible.toShortString(),
+                    )
+                }
+                // The host QA runner captures the actual device frame from adb during this window.
+                delay(2_000)
+            }
+
+            awaitDecoded("initial tall strip is visible and decoded")
+            reader.onActivity { activity ->
+                activity.hideMenu()
+                val viewer = activity.viewModel.state.value.viewer as WebtoonViewer
+                val strip = viewer.recycler.all<WebtoonStripImageView>().first { it.isShown && it.height > 50_000 }
+                assertTrue("Reader reports a 1-based page after loading the chapter", expectedPage > 0)
+                assertEquals("Initial fit uses the full available width", viewer.recycler.width, strip.width)
+                assertEquals(1f, viewer.recycler.scaleX, 0.001f)
+                val visible = Rect()
+                assertTrue("Initial fit has a visible strip viewport", strip.getLocalVisibleRect(visible))
+                fitBeforePinchVisibleTop = visible.top
+                lastDiagnostic = diagnostic(activity)
+            }
+            captureStage("fit-before")
+
+            // A real pinch goes through Activity.dispatchTouchEvent and the production scale detector.
+            reader.onActivity { activity -> dispatchNativePinch(activity, zoomIn = true) }
+            var zoomedScale = 1f
+            reader.onActivity { activity ->
+                zoomedScale = (activity.viewModel.state.value.viewer as WebtoonViewer).recycler.scaleX
+            }
+            reader.onActivity { activity -> lastDiagnostic = diagnostic(activity) }
+            assertStage(
+                "pinch-in-recognition",
+                zoomedScale > 1.2f,
+                "Two-pointer pinch-in should reach the live Webtoon scale detector; scale=$zoomedScale",
+            )
+            delay(80)
+            reader.onActivity { activity -> dispatchNativePinch(activity, zoomIn = false) }
+            awaitStage("rapid reversal returns to fit width") {
+                var scale = 0f
+                reader.onActivity { activity ->
+                    scale = (activity.viewModel.state.value.viewer as WebtoonViewer).recycler.scaleX
+                    lastDiagnostic = diagnostic(activity)
+                }
+                kotlin.math.abs(scale - 1f) < 0.03f
+            }
+            awaitDecoded("rapid reversal has decoded the visible tall strip at fit width")
+            captureStage("rapid-reversal-fit")
+
+            var fitAfterPinchVisibleTop = 0
+            reader.onActivity { activity ->
+                val strip = (activity.viewModel.state.value.viewer as WebtoonViewer).recycler
+                    .all<WebtoonStripImageView>().first { it.isShown && it.height > 50_000 }
+                val visible = Rect()
+                assertTrue("The strip remains visible after the centered pinch roundtrip", strip.getLocalVisibleRect(visible))
+                fitAfterPinchVisibleTop = visible.top
+            }
+            assertStage(
+                "centered pinch roundtrip preserves the image anchor",
+                kotlin.math.abs(fitAfterPinchVisibleTop - fitBeforePinchVisibleTop) <= 2,
+                "The unchanged centered pinch should not pan the image: before=$fitBeforePinchVisibleTop after=$fitAfterPinchVisibleTop",
+            )
+
+            var beforeZoomPanTop = 0
+            reader.onActivity { activity -> dispatchNativePinch(activity, zoomIn = true) }
+            awaitStage("second pinch-in reaches a magnified state") {
+                var scale = 0f
+                reader.onActivity { activity ->
+                    scale = (activity.viewModel.state.value.viewer as WebtoonViewer).recycler.scaleX
+                    lastDiagnostic = diagnostic(activity)
+                }
+                scale > 1.2f
+            }
+            reader.onActivity { activity ->
+                val strip = (activity.viewModel.state.value.viewer as WebtoonViewer).recycler
+                    .all<WebtoonStripImageView>().first { it.isShown && it.height > 50_000 }
+                val visible = Rect()
+                assertTrue(strip.getLocalVisibleRect(visible))
+                beforeZoomPanTop = visible.top
+                dispatchNativeDrag(activity)
+            }
+            awaitStage("pan while magnified advances the strip viewport") {
+                var moved = false
+                reader.onActivity { activity ->
+                    val viewer = activity.viewModel.state.value.viewer as? WebtoonViewer
+                    val strip = viewer?.recycler?.all<WebtoonStripImageView>()
+                        ?.firstOrNull { it.isShown && it.height > 50_000 }
+                    val visible = Rect()
+                    val hasVisible = strip?.getLocalVisibleRect(visible) == true
+                    moved = viewer != null && viewer.recycler.scaleX > 1.2f &&
+                        hasVisible && visible.top > beforeZoomPanTop + 40
+                    lastDiagnostic = diagnostic(activity)
+                }
+                moved
+            }
+            awaitDecoded("magnified pan has decoded the newly visible strip tiles")
+            captureStage("zoomed-pan")
+
+            var beforeVisibleTop = 0
+            reader.onActivity { activity ->
+                val viewer = activity.viewModel.state.value.viewer as WebtoonViewer
+                val strip = viewer.recycler.all<WebtoonStripImageView>()
+                    .first { it.isShown && it.height > 50_000 }
+                val visible = Rect()
+                assertTrue("The tall strip has a visible viewport before drag", strip.getLocalVisibleRect(visible))
+                beforeVisibleTop = visible.top
+                lastDiagnostic = diagnostic(activity)
+                dispatchNativeDrag(activity)
+            }
+            awaitStage("real scroll after rapid reversal advances the long image") {
+                var moved = false
+                reader.onActivity { activity ->
+                    val state = activity.viewModel.state.value
+                    val viewer = state.viewer as? WebtoonViewer
+                    val strip = viewer?.recycler?.all<WebtoonStripImageView>()
+                        ?.firstOrNull { it.isShown && it.height > 50_000 }
+                    val visible = Rect()
+                    val hasVisible = strip?.getLocalVisibleRect(visible) == true
+                    moved = viewer != null &&
+                        state.currentChapter?.chapter?.id == chapter &&
+                        state.currentPage == expectedPage &&
+                        hasVisible && visible.top > beforeVisibleTop + 100
+                    lastDiagnostic = diagnostic(activity)
+                }
+                moved
+            }
+            awaitDecoded("scrolled long-image viewport is decoded")
+            captureStage("scroll-after-rapid-reversal")
+
+            // The prior single pinch-in must be reversed once to return to fit width.
+            reader.onActivity { activity -> dispatchNativePinch(activity, zoomIn = false) }
+            awaitStage("return-to-normal gesture restores width fit") {
+                var scale = 0f
+                reader.onActivity { activity ->
+                    scale = (activity.viewModel.state.value.viewer as WebtoonViewer).recycler.scaleX
+                    lastDiagnostic = diagnostic(activity)
+                }
+                kotlin.math.abs(scale - 1f) < 0.03f
+            }
+            awaitDecoded("returned fit-width viewport has decoded visible regions")
+            reader.onActivity { activity ->
+                val viewer = activity.viewModel.state.value.viewer as WebtoonViewer
+                val strip = viewer.recycler.all<WebtoonStripImageView>().first { it.isShown && it.height > 50_000 }
+                assertEquals("Return to normal restores the image's fit-width geometry", viewer.recycler.width, strip.width)
+                assertEquals(chapter, activity.viewModel.state.value.currentChapter?.chapter?.id)
+                assertEquals(expectedPage, activity.viewModel.state.value.currentPage)
+                lastDiagnostic = diagnostic(activity)
+            }
+            captureStage("return-to-fit")
+
+        }
+    }
+
+    @Test fun webtoonLongStripModesSurviveZoomedAndBelowFitScroll() = runBlocking {
+        listOf(ReadingMode.WEBTOON, ReadingMode.CONTINUOUS_VERTICAL).forEach { mode ->
+            verifyLongStripModeSurvivesZoomedAndBelowFitScroll(mode)
+        }
+    }
+
+    private suspend fun verifyLongStripModeSurvivesZoomedAndBelowFitScroll(mode: ReadingMode) {
+        fixture(
+            mode = mode,
+            sourceId = OriginalDemoSource.WEBTOON_ID,
+            disableZoomOut = false,
+            wideFixture = true,
+        ) { reader, chapter ->
+            val modeName = mode.name.lowercase().replace('_', '-')
+            var expectedPage = 0
+            fun sample(): Triple<WebtoonViewer?, WebtoonStripImageView?, Rect> {
+                var result = Triple<WebtoonViewer?, WebtoonStripImageView?, Rect>(null, null, Rect())
+                reader.onActivity { activity ->
+                    val viewer = activity.viewModel.state.value.viewer as? WebtoonViewer
+                    val strip = viewer?.recycler?.all<WebtoonStripImageView>()?.firstOrNull { it.isShown && it.height > 50_000 }
+                    val visible = Rect()
+                    if (strip?.getLocalVisibleRect(visible) != true) visible.setEmpty()
+                    result = Triple(viewer, strip, visible)
+                }
+                return result
+            }
+            fun chapterMatches(): Boolean {
+                var matches = false
+                reader.onActivity { activity ->
+                    val state = activity.viewModel.state.value
+                    matches = expectedPage > 0 && state.currentChapter?.chapter?.id == chapter &&
+                        state.currentPage == expectedPage
+                }
+                return matches
+            }
+
+            await("$modeName wide long strip is decoded") {
+                val (viewer, strip, _) = sample()
+                strip?.hasDecodedImage == true &&
+                    viewer != null && strip.width == viewer.recycler.width &&
+                    strip.height > 50_000 &&
+                    strip.autoScrollDiagnosticState().contains("image=1400x80000")
+            }
+            await("$modeName first logical page is ready") {
+                var ready = false
+                reader.onActivity { activity ->
+                    val state = activity.viewModel.state.value
+                    if (expectedPage == 0 && state.currentChapter?.chapter?.id == chapter && state.currentPage > 0) {
+                        expectedPage = state.currentPage
+                    }
+                    ready = expectedPage > 0 && state.currentPage == expectedPage
+                }
+                ready
+            }
+            reader.onActivity { activity -> activity.hideMenu() }
+            captureZoomStage(reader, "$modeName-fit")
+
+            reader.onActivity { activity -> dispatchNativePinch(activity, zoomIn = true) }
+            await("$modeName strip zooms in") {
+                val (viewer) = sample()
+                (viewer?.recycler?.scaleX ?: 0f) > 1.2f
+            }
+            val beforeZoomPan = sample().third.top
+            reader.onActivity { activity -> dispatchNativeDrag(activity) }
+            await("$modeName pan advances the magnified image") {
+                val (viewer, strip, visible) = sample()
+                viewer != null && viewer.recycler.scaleX > 1.2f && strip?.hasDecodedImage == true && visible.top > beforeZoomPan + 40
+            }
+            captureZoomStage(reader, "$modeName-zoomed-pan")
+
+            val scaleBeforePartialZoomOut = sample().first?.recycler?.scaleX ?: error("$modeName viewer disappeared")
+            reader.onActivity { activity ->
+                dispatchNativePinch(activity, zoomIn = false, terminalSpanFraction = 0.72f)
+            }
+            await("$modeName partial zoom-out remains enlarged") {
+                val scale = sample().first?.recycler?.scaleX ?: 0f
+                scale > 1.2f && scale < scaleBeforePartialZoomOut - 0.05f
+            }
+            captureZoomStage(reader, "$modeName-partial-zoom-out")
+
+            val beforePartialOutForward = sample().third.top
+            reader.onActivity { activity -> dispatchNativeDrag(activity) }
+            await("$modeName scroll after partial zoom-out advances while still enlarged") {
+                val (viewer, strip, visible) = sample()
+                viewer != null && viewer.recycler.scaleX > 1.2f &&
+                    strip?.hasDecodedImage == true && visible.top > beforePartialOutForward + 40 && chapterMatches()
+            }
+            captureZoomStage(reader, "$modeName-partial-zoom-out-forward-scroll")
+
+            val beforePartialOutReverse = sample().third.top
+            reader.onActivity { activity ->
+                val viewport = (activity.viewModel.state.value.viewer as WebtoonViewer).getView()
+                dispatchNativeDrag(activity, viewport, moveUp = false)
+            }
+            await("$modeName reverse scroll after partial zoom-out stays enlarged") {
+                val (viewer, strip, visible) = sample()
+                viewer != null && viewer.recycler.scaleX > 1.2f &&
+                    strip?.hasDecodedImage == true && visible.top < beforePartialOutReverse - 40 && chapterMatches()
+            }
+            captureZoomStage(reader, "$modeName-partial-zoom-out-reverse-scroll")
+
+            reader.onActivity { activity -> dispatchNativePinch(activity, zoomIn = false) }
+            await("$modeName reverse pinch reaches fit or below") {
+                val scale = sample().first?.recycler?.scaleX ?: 0f
+                scale in 0.5f..1.03f
+            }
+            reader.onActivity { activity -> dispatchNativePinch(activity, zoomIn = false) }
+            await("$modeName permits zoom below fit") {
+                val (viewer) = sample()
+                val scale = viewer?.recycler?.scaleX ?: 1f
+                scale in 0.5f..0.97f
+            }
+            await("$modeName below-fit layout settles") {
+                var settled = false
+                reader.onActivity { activity ->
+                    val viewer = activity.viewModel.state.value.viewer as? WebtoonViewer
+                    settled = viewer != null && viewer.recycler.layoutParams.height > viewer.getView().height
+                }
+                settled
+            }
+            var beforeBelowFit = 0
+            reader.onActivity { activity ->
+                beforeBelowFit = (activity.viewModel.state.value.viewer as WebtoonViewer).recycler.computeVerticalScrollOffset()
+                dispatchNativeDrag(activity)
+            }
+            await("$modeName below-fit scroll still moves and decodes") {
+                var moved = false
+                reader.onActivity { activity ->
+                    val state = activity.viewModel.state.value
+                    val viewer = state.viewer as? WebtoonViewer
+                    val strip = viewer?.recycler?.all<WebtoonStripImageView>()?.firstOrNull { it.isShown && it.height > 50_000 }
+                    moved = state.currentChapter?.chapter?.id == chapter && viewer != null &&
+                        viewer.recycler.scaleX < 0.98f &&
+                        kotlin.math.abs(viewer.recycler.computeVerticalScrollOffset() - beforeBelowFit) > 80 &&
+                        strip?.hasDecodedImage == true
+                }
+                moved
+            }
+            captureZoomStage(reader, "$modeName-below-fit-scroll")
+        }
+    }
+
+    @Test fun verticalPagerLongImageSurvivesZoomedPanAndReturnToFit() = runBlocking {
+        fixture(
+            mode = ReadingMode.VERTICAL,
+            disableZoomOut = false,
+            cropPaged = true,
+            wideFixture = true,
+        ) { reader, chapter ->
+            fun currentImageTarget(): InjectedTouchTarget {
+                var target: InjectedTouchTarget? = null
+                reader.onActivity { activity ->
+                    val image = verticalPagerImage(activity)
+                        ?: throw AssertionError("Visible vertical pager image is missing: " + verticalPagerDiagnostic(activity))
+                    target = injectedTouchTarget(activity, image)
+                    Log.i("ArkhiveZoomQA", "TOUCH_TARGET " + verticalPagerDiagnostic(activity))
+                }
+                return checkNotNull(target)
+            }
+
+            suspend fun awaitVerticalStage(stage: String, condition: (ReaderActivity) -> Boolean) {
+                try {
+                    await(stage) {
+                        var matched = false
+                        reader.onActivity { activity -> matched = condition(activity) }
+                        matched
+                    }
+                } catch (error: AssertionError) {
+                    reader.onActivity { activity ->
+                        Log.e("ArkhiveZoomQA", "FAIL:vertical-pager-" + stage.replace(' ', '-') + " " + verticalPagerDiagnostic(activity))
+                    }
+                    delay(2_000)
+                    throw error
+                }
+            }
+
+            await("vertical pager wide long image is ready") {
+                var ready = false
+                reader.onActivity { activity ->
+                    val firstHolder = activity.findViewById<View>(android.R.id.content).all<PagerPageHolder>()
+                        .firstOrNull { it.page.index == 0 && it.isShown }
+                    val image = firstHolder?.all<SubsamplingScaleImageView>()?.firstOrNull()
+                    ready = image != null && image.isReady && image.sWidth == 1400 && image.sHeight > 70_000 &&
+                        firstHolder?.page?.index == 0 && activity.viewModel.state.value.currentPage == 1
+                }
+                ready
+            }
+            reader.onActivity { activity -> activity.hideMenu() }
+            captureVerticalPagerStage(reader, "vertical-pager-fit")
+
+            dispatchInjectedPinch(currentImageTarget(), zoomIn = true)
+            awaitVerticalStage("vertical pager long image zooms beyond its fit scale") { activity ->
+                val image = verticalPagerImage(activity)
+                image != null && image.isReady && image.scale > image.minScale * 1.2f &&
+                    activity.viewModel.state.value.currentPage == 1
+            }
+            captureVerticalPagerStage(reader, "vertical-pager-zoomed")
+
+            var lastForwardCenter = 0f
+            reader.onActivity { activity ->
+                lastForwardCenter = verticalPagerImage(activity)?.center?.y ?: 0f
+            }
+            repeat(3) { index ->
+                dispatchInjectedDrag(currentImageTarget(), moveUp = true)
+                awaitVerticalStage("vertical pager forward drag " + index) { activity ->
+                    val image = verticalPagerImage(activity)
+                    image != null && image.isReady && image.scale > image.minScale * 1.2f &&
+                        (image.center?.y ?: lastForwardCenter) > lastForwardCenter + 20f &&
+                        activity.viewModel.state.value.currentChapter?.chapter?.id == chapter &&
+                        activity.viewModel.state.value.currentPage == 1
+                }
+                reader.onActivity { activity ->
+                    lastForwardCenter = verticalPagerImage(activity)?.center?.y ?: lastForwardCenter
+                }
+                delay(350)
+            }
+            captureVerticalPagerStage(reader, "vertical-pager-zoomed-forward-pan")
+
+            var beforeReverse = lastForwardCenter
+            reader.onActivity { activity ->
+                beforeReverse = verticalPagerImage(activity)?.center?.y ?: beforeReverse
+            }
+            dispatchInjectedDrag(currentImageTarget(), moveUp = false)
+            awaitVerticalStage("vertical pager reverse drag") { activity ->
+                val image = verticalPagerImage(activity)
+                image != null && image.isReady && image.scale > image.minScale * 1.2f &&
+                    (image.center?.y ?: beforeReverse) < beforeReverse - 20f &&
+                    activity.viewModel.state.value.currentPage == 1
+            }
+            captureVerticalPagerStage(reader, "vertical-pager-zoomed-reverse-pan")
+
+            var scaleBeforePartialOut = 0f
+            reader.onActivity { activity ->
+                scaleBeforePartialOut = verticalPagerImage(activity)?.scale ?: 0f
+            }
+            dispatchInjectedPinch(currentImageTarget(), zoomIn = false, terminalSpanFraction = 0.72f)
+            awaitVerticalStage("vertical pager partial zoom-out remains above fit") { activity ->
+                val image = verticalPagerImage(activity)
+                image != null && image.isReady && image.scale > image.minScale * 1.2f &&
+                    image.scale < scaleBeforePartialOut - 0.02f && activity.viewModel.state.value.currentPage == 1
+            }
+            captureVerticalPagerStage(reader, "vertical-pager-partial-zoom-out")
+
+            var partialOutForwardCenter = 0f
+            reader.onActivity { activity ->
+                partialOutForwardCenter = verticalPagerImage(activity)?.center?.y ?: 0f
+            }
+            dispatchInjectedDrag(currentImageTarget(), moveUp = true)
+            awaitVerticalStage("vertical pager scrolls forward after partial zoom-out") { activity ->
+                val image = verticalPagerImage(activity)
+                image != null && image.isReady && image.scale > image.minScale * 1.2f &&
+                    (image.center?.y ?: partialOutForwardCenter) > partialOutForwardCenter + 20f &&
+                    activity.viewModel.state.value.currentChapter?.chapter?.id == chapter &&
+                    activity.viewModel.state.value.currentPage == 1
+            }
+            captureVerticalPagerStage(reader, "vertical-pager-partial-zoom-out-forward-scroll")
+
+            var partialOutReverseCenter = 0f
+            reader.onActivity { activity ->
+                partialOutReverseCenter = verticalPagerImage(activity)?.center?.y ?: 0f
+            }
+            dispatchInjectedDrag(currentImageTarget(), moveUp = false)
+            awaitVerticalStage("vertical pager reverses scroll while still zoomed after zoom-out") { activity ->
+                val image = verticalPagerImage(activity)
+                image != null && image.isReady && image.scale > image.minScale * 1.2f &&
+                    (image.center?.y ?: partialOutReverseCenter) < partialOutReverseCenter - 20f &&
+                    activity.viewModel.state.value.currentChapter?.chapter?.id == chapter &&
+                    activity.viewModel.state.value.currentPage == 1
+            }
+            captureVerticalPagerStage(reader, "vertical-pager-partial-zoom-out-reverse-scroll")
+
+            dispatchInjectedPinch(currentImageTarget(), zoomIn = false)
+            awaitVerticalStage("vertical pager returns to its enforced fit-width minimum") { activity ->
+                val image = verticalPagerImage(activity)
+                image != null && image.isReady && image.scale <= image.minScale * 1.1f &&
+                    activity.viewModel.state.value.currentPage == 1
+            }
+            captureVerticalPagerStage(reader, "vertical-pager-return-fit")
+
+            var fitCenter = 0f
+            reader.onActivity { activity -> fitCenter = verticalPagerImage(activity)?.center?.y ?: 0f }
+            dispatchInjectedDrag(currentImageTarget(), moveUp = true)
+            awaitVerticalStage("vertical pager still scrolls at fit width") { activity ->
+                val image = verticalPagerImage(activity)
+                image != null && image.isReady && image.scale <= image.minScale * 1.1f &&
+                    (image.center?.y ?: fitCenter) > fitCenter + 20f &&
+                    activity.viewModel.state.value.currentChapter?.chapter?.id == chapter &&
+                    activity.viewModel.state.value.currentPage == 1
+            }
+            captureVerticalPagerStage(reader, "vertical-pager-fit-scroll")
         }
     }
 

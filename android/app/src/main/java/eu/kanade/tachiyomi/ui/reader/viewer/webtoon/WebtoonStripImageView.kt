@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Point
 import android.graphics.Rect
 import android.view.MotionEvent
 import android.view.View
@@ -11,6 +12,7 @@ import eu.kanade.tachiyomi.data.coil.ImageDecoder
 import kotlinx.coroutines.*
 import mihon.readingapp.readers.LongPagePolicy
 import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 /** Width-fitted regions retain source geometry. Only visible tiles plus one neighbor are decoded. */
@@ -35,15 +37,42 @@ class WebtoonStripImageView(context: Context) : View(context) {
     private val clip = Rect()
     private val autoReadRect = Rect()
     private val destination = Rect()
+    private val globalVisibleRect = Rect()
+    private val globalVisibleOrigin = Point()
     var onReload: (() -> Unit)? = null
     var onReady: (() -> Unit)? = null
     var onRegionDecoded: (() -> Unit)? = null
     var onFailure: ((Throwable) -> Unit)? = null
     val cachedBitmapBytes: Long get() = tiles.values.sumOf { it.bitmap.allocationByteCount.toLong() }
     val cachedTileCount: Int get() = tiles.size
+
+    /**
+     * View.getLocalVisibleRect offsets the global clip into local coordinates but does not
+     * invert an ancestor's scale. The Webtoon reader scales its RecyclerView for zoom, so map
+     * the clipped global viewport through that uniform scale before selecting source regions.
+     */
+    private fun getVisibleLocalRect(out: Rect): Boolean {
+        if (width <= 0 || height <= 0 || !getGlobalVisibleRect(globalVisibleRect, globalVisibleOrigin)) {
+            out.setEmpty()
+            return false
+        }
+        val inverseScale = 1.0 / zoom().coerceAtLeast(0.001f)
+        out.set(
+            floor((globalVisibleRect.left - globalVisibleOrigin.x) * inverseScale).toInt(),
+            floor((globalVisibleRect.top - globalVisibleOrigin.y) * inverseScale).toInt(),
+            ceil((globalVisibleRect.right - globalVisibleOrigin.x) * inverseScale).toInt(),
+            ceil((globalVisibleRect.bottom - globalVisibleOrigin.y) * inverseScale).toInt(),
+        )
+        if (!out.intersect(0, 0, width, height)) {
+            out.setEmpty()
+            return false
+        }
+        return true
+    }
+
     fun autoScrollDiagnosticState(): String {
         val local = Rect()
-        val visible = getLocalVisibleRect(local) && !local.isEmpty
+        val visible = getVisibleLocalRect(local) && !local.isEmpty
         val scale = if (imageWidth > 0) width.toDouble() / imageWidth else 0.0
         val target = if (imageWidth > 0) (width * zoom()).roundToInt().coerceIn(1, 4096).coerceAtMost(imageWidth) else 1
         val sample = if (imageWidth > 0) LongPagePolicy.widthSample(imageWidth, target) else 1
@@ -52,14 +81,14 @@ class WebtoonStripImageView(context: Context) : View(context) {
         val first = if (visible && scale > 0) (local.top / scale / rows).toInt().coerceIn(0, count - 1) else -1
         val last = if (visible && scale > 0) ((local.bottom - 1).coerceAtLeast(0) / scale / rows).toInt().coerceIn(first, count - 1) else -1
         val visibleKeys = if (first >= 0) (first..last).map { Key(sample, target, it) } else emptyList()
-        return "visible=$visible/local=${local.flattenToString()}/image=${imageWidth}x$imageHeight/" +
+        return "visible=$visible/local=${local.flattenToString()}/scale=${zoom()}/sourceRows=$first..$last/image=${imageWidth}x$imageHeight/" +
             "tiles=${tiles.size}/visibleTiles=${visibleKeys.count(tiles::containsKey)}/${visibleKeys.size}/" +
             "rangeReady=${visibleKeys.isNotEmpty() && visibleKeys.all(tiles::containsKey)}/pending=${pending?.isActive == true}"
     }
     val hasDecodedImage: Boolean get() {
         if(image == null || width <= 0 || imageWidth <= 0 || imageHeight <= 0) return false
         val actual = autoReadRect
-        if(!getLocalVisibleRect(actual) || actual.isEmpty) return false
+        if(!getVisibleLocalRect(actual) || actual.isEmpty) return false
         val target = (width * zoom()).roundToInt().coerceIn(1,4096).coerceAtMost(imageWidth)
         val sample = LongPagePolicy.widthSample(imageWidth,target)
         val rows = LongPagePolicy.regionRows(imageWidth,sample)
@@ -79,7 +108,7 @@ class WebtoonStripImageView(context: Context) : View(context) {
         val scale = width.toDouble() / imageWidth
         val count = ceil(imageHeight.toDouble() / rows).toInt()
         val visibleRect = autoReadRect
-        val isVisible = getLocalVisibleRect(visibleRect) && !visibleRect.isEmpty
+        val isVisible = getVisibleLocalRect(visibleRect) && !visibleRect.isEmpty
         val first = if (isVisible) (visibleRect.top / scale / rows).toInt().coerceIn(0, count - 1) else 0
         val last = if (isVisible) ((visibleRect.bottom - 1).coerceAtLeast(0) / scale / rows).toInt().coerceIn(first, count - 1) else 0
         if ((first..last).any { !tiles.containsKey(Key(sample, target, it)) }) return null
@@ -162,7 +191,7 @@ class WebtoonStripImageView(context: Context) : View(context) {
     }
     override fun onDraw(canvas: Canvas) {
         val selected = image ?: return
-        if (width <= 0 || !getLocalVisibleRect(clip)) return
+        if (width <= 0 || !getVisibleLocalRect(clip)) return
         val scale = width.toDouble() / imageWidth
         val target = (width * zoom()).roundToInt().coerceIn(1, 4096).coerceAtMost(imageWidth)
         val sample = LongPagePolicy.widthSample(imageWidth, target)

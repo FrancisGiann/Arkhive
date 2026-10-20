@@ -5,6 +5,8 @@ import android.content.ContextWrapper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -66,6 +68,48 @@ class LnReaderSandboxRuntimeTest {
         )
         assertEquals("undefined", second.value?.jsonPrimitive?.content)
         assertEquals("2", second.storage["calls"]?.jsonObject?.get("value")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun cancelingAnUndispatchedSupportCheckDoesNotPoisonTheNextProviderConnection() = runBlocking {
+        val runtime = LnReaderSandboxRuntime(context, FixtureFetch())
+        val leavingScreen = async(Dispatchers.IO, start = CoroutineStart.UNDISPATCHED) {
+            runtime.supportStatus()
+        }
+        assertFalse("The test must cancel while support is still waiting for the provider bind.", leavingScreen.isCompleted)
+        leavingScreen.cancelAndJoin()
+
+        repeat(2) { index ->
+            val support = withTimeout(20_000) { runtime.supportStatus() }
+            assertTrue("Provider reconnect ${index + 1} failed after screen cancellation: ${support.reason}", support.supported)
+        }
+        val operation = runtime.execute(
+            "fixture-source", "Authored fixture", "https://fixture.invalid/", "1.0", COMMON_JS.toByteArray(),
+            "parseChapter", listOf(JsonPrimitive("after canceled support")), setOf("https://fixture.invalid:443"),
+        )
+        assertEquals("undefined", operation.value?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun repeatedSupportChecksCloseAndReacquireBeforeFreshPluginOperations() = runBlocking {
+        val runtime = LnReaderSandboxRuntime(context, FixtureFetch())
+        repeat(3) { index ->
+            val support = withTimeout(20_000) { runtime.supportStatus() }
+            assertTrue("Support check ${index + 1} failed: ${support.reason}", support.supported)
+        }
+
+        val first = runtime.execute(
+            "fixture-source", "Authored fixture", "https://fixture.invalid/", "1.0", COMMON_JS.toByteArray(),
+            "parseChapter", listOf(JsonPrimitive("first")), setOf("https://fixture.invalid:443"),
+        )
+        assertEquals("undefined", first.value?.jsonPrimitive?.content)
+        val supportAfterExecution = runtime.supportStatus()
+        assertTrue("The provider must remain reconnectable after repeated checks and execution: ${supportAfterExecution.reason}", supportAfterExecution.supported)
+        val second = runtime.execute(
+            "fixture-source", "Authored fixture", "https://fixture.invalid/", "1.0", COMMON_JS.toByteArray(),
+            "parseChapter", listOf(JsonPrimitive("second")), setOf("https://fixture.invalid:443"),
+        )
+        assertEquals("undefined", second.value?.jsonPrimitive?.content)
     }
 
     @Test

@@ -1,6 +1,6 @@
-# Arkhive Android source — 0.4.5
+# Arkhive Android source — 0.4.8
 
-This is the implementation snapshot corresponding to the 0.4.5 preview APK. It is a modified Mihon v0.21.1 project, upstream commit `e9670d8a12ff4526d9ca09daa73280b8c42b9bb0`. The upstream README is retained as [UPSTREAM-README.md](UPSTREAM-README.md), with its Apache-2.0 license in [LICENSE](LICENSE). Readium, Noto, LNReader helper and other bundled notices remain in `licenses/` and `app/src/main/assets/lnreader/`.
+This is the implementation snapshot corresponding to the 0.4.8 preview APK. It is a modified Mihon v0.21.1 project, upstream commit `e9670d8a12ff4526d9ca09daa73280b8c42b9bb0`. The upstream README is retained as [UPSTREAM-README.md](UPSTREAM-README.md), with its Apache-2.0 license in [LICENSE](LICENSE). Readium, Noto, LNReader helper and other bundled notices remain in `licenses/` and `app/src/main/assets/lnreader/`.
 
 ## Build
 
@@ -9,7 +9,7 @@ Use JDK 21 with `javac`, Android SDK platform 37.2, NDK 29.0.14206865 and build 
 ```sh
 nice -n 10 scripts/build-private.sh --no-daemon --max-workers=1 --no-parallel \
   -Dorg.gradle.parallel=false -Dorg.gradle.tooling.parallel=false \
-  '-Dorg.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=768m -XX:ReservedCodeCacheSize=256m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8' \
+  '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=640m -XX:ReservedCodeCacheSize=192m -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8' \
   -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
 ```
 

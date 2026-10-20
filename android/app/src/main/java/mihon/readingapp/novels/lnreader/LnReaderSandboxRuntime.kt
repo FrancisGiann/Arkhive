@@ -27,8 +27,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.coroutineContext
@@ -55,18 +55,37 @@ class LnReaderSandboxRuntime(
         if (!JavaScriptSandbox.isSupported()) {
             return@withLock LnReaderRuntimeSupport(false, REQUIRED_FEATURES, "The installed WebView provider does not support AndroidX JavaScriptSandbox.")
         }
-        val sandbox = try { withTimeout(SUPPORT_TIMEOUT_MS) { connectSandbox() } } catch (failure: CancellationException) {
+        val sandboxLease = try { withTimeout(SUPPORT_TIMEOUT_MS) { connectSandbox() } } catch (failure: CancellationException) {
             currentCoroutineContext().ensureActive()
             return@withLock LnReaderRuntimeSupport(false, REQUIRED_FEATURES, "The isolated JavaScript provider did not connect before the support check timed out.")
         } catch (failure: Throwable) {
             return@withLock LnReaderRuntimeSupport(false, REQUIRED_FEATURES, "The installed provider could not start an isolated JavaScript process: ${failure.rootMessage()}")
         }
+        var support: LnReaderRuntimeSupport? = null
+        var inspectionFailure: Throwable? = null
         try {
+            val sandbox = sandboxLease.resource
             val missing = REQUIRED_FEATURES.filterNot(sandbox::isFeatureSupported)
-            LnReaderRuntimeSupport(missing.isEmpty(), missing, if (missing.isEmpty()) null else "The installed provider is missing required isolation features.")
-        } finally {
-            sandbox.close()
+            support = LnReaderRuntimeSupport(missing.isEmpty(), missing, if (missing.isEmpty()) null else "The installed provider is missing required isolation features.")
+        } catch (failure: Throwable) {
+            inspectionFailure = failure
         }
+        val closeFailure = try {
+            sandboxLease.close()
+            null
+        } catch (failure: Throwable) {
+            failure
+        }
+        val failure = inspectionFailure ?: closeFailure
+        if (failure != null) {
+            if (failure is CancellationException) currentCoroutineContext().ensureActive()
+            return@withLock LnReaderRuntimeSupport(
+                false,
+                REQUIRED_FEATURES,
+                "The installed provider could not complete its isolated JavaScript support check: ${failure.rootMessage()}",
+            )
+        }
+        checkNotNull(support)
     }
 
     suspend fun execute(
@@ -94,7 +113,8 @@ class LnReaderSandboxRuntime(
 
         withTimeout(OPERATION_TIMEOUT_MS) {
             withContext(Dispatchers.IO) {
-                val sandbox = connectSandbox()
+                val sandboxLease = connectSandbox()
+                val sandbox = sandboxLease.resource
                 var isolate: JavaScriptIsolate? = null
                 try {
                     val missing = REQUIRED_FEATURES.filterNot(sandbox::isFeatureSupported)
@@ -207,7 +227,7 @@ class LnReaderSandboxRuntime(
                     }
                     error("Unreachable plugin operation state.")
                 } finally {
-                    try { isolate?.close() } finally { sandbox.close() }
+                    try { isolate?.close() } finally { sandboxLease.close() }
                 }
             }
         }
@@ -233,41 +253,22 @@ class LnReaderSandboxRuntime(
 
     private fun storageJsonSize(storage: Map<String, JsonElement>): Int = JsonObject(storage).toString().toByteArray(Charsets.UTF_8).size
 
-    private suspend fun connectSandbox(): JavaScriptSandbox {
-        val future = JavaScriptSandbox.createConnectedInstanceAsync(appContext)
-        return suspendCancellableCoroutine { continuation ->
-            val lock = Any()
-            var connected: JavaScriptSandbox? = null
-            fun closeConnected(sandbox: JavaScriptSandbox) {
-                val ownsClose = synchronized(lock) {
-                    if (connected === sandbox) {
-                        connected = null
-                        true
-                    } else false
-                }
-                if (ownsClose) sandbox.close()
-            }
-            continuation.invokeOnCancellation {
-                future.cancel(true)
-                val lateSandbox = synchronized(lock) { connected.also { connected = null } }
-                lateSandbox?.close()
-            }
-            future.addListener({
-                val sandbox = try { future.get() } catch (failure: Throwable) {
-                    if (continuation.isActive) continuation.resumeWithException(failure.rootCause())
-                    return@addListener
-                }
-                synchronized(lock) {
-                    if (!continuation.isActive) sandbox.close()
-                    else {
-                        connected = sandbox
-                        continuation.resume(sandbox) { _, value, _ ->
-                            closeConnected(value)
-                        }
+    private suspend fun connectSandbox(): SandboxConnectionOwner.Lease<JavaScriptSandbox> {
+        // Capture only the process application context so a canceled screen cannot be retained by
+        // an AndroidX bind that is still completing in the background.
+        val context = appContext
+        return connectionOwner.acquire {
+            val providerFuture = JavaScriptSandbox.createConnectedInstanceAsync(context)
+            CompletableFuture<JavaScriptSandbox>().also { completion ->
+                providerFuture.addListener({
+                    try {
+                        completion.complete(providerFuture.get())
+                    } catch (failure: Throwable) {
+                        completion.completeExceptionally((failure as? ExecutionException)?.cause ?: failure.cause ?: failure)
                     }
-                }
-            }, MoreExecutors.directExecutor())
-        }
+                }, MoreExecutors.directExecutor())
+            }
+        }.awaitConnectionCancellable()
     }
 
     private fun Throwable.rootCause(): Throwable = (this as? ExecutionException)?.cause ?: cause ?: this
@@ -301,6 +302,18 @@ class LnReaderSandboxRuntime(
             JavaScriptSandbox.JS_FEATURE_EVALUATE_WITHOUT_TRANSACTION_LIMIT,
         )
         val globalLock = Mutex()
+        val connectionOwner = SandboxConnectionOwner<JavaScriptSandbox>()
+    }
+}
+
+private suspend fun <T : AutoCloseable> CompletableFuture<T>.awaitConnectionCancellable(): T = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation { cancel(false) }
+    whenComplete { value, failure ->
+        if (failure != null) {
+            if (continuation.isActive) continuation.resumeWithException(failure)
+        } else {
+            continuation.resume(checkNotNull(value)) { _, abandoned, _ -> abandoned.close() }
+        }
     }
 }
 
@@ -314,3 +327,4 @@ private suspend fun <T> ListenableFuture<T>.awaitCancellable(): T = suspendCance
         }
     }, MoreExecutors.directExecutor())
 }
+

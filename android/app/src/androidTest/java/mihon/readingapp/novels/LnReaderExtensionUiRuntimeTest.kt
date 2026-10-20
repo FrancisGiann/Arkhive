@@ -186,15 +186,17 @@ class LnReaderExtensionUiRuntimeTest {
             waitFor("The focused extension update review reopens") { device.hasObject(By.text("Trust and update")) }
             val additionalOriginInput = requireNotNull(device.findObject(By.clazz("android.widget.EditText")))
             additionalOriginInput.text = "http://images.fixture.invalid/assets/cover.png?size=small"
+            scrollUntilVisible("HTTP origins cannot be trusted", contains = true, startYPercent = 75)
             waitFor("HTTP input shows the policy reason inline") {
                 device.hasObject(By.textContains("HTTP origins cannot be trusted"))
             }
-            assertFalse("Trust is disabled for HTTP input.", requireNotNull(device.findObject(By.text("Trust and update"))).isEnabled)
+            assertFalse("Trust is disabled for HTTP input.", clickableAncestor("Trust and update").isEnabled)
             additionalOriginInput.text = "https://images.fixture.invalid/assets/cover.png?size=small,medium"
+            scrollUntilVisible("• https://images.fixture.invalid:443", startYPercent = 75)
             waitFor("The review previews the exact normalized host and port") {
-                device.hasObject(By.text("https://images.fixture.invalid:443"))
+                device.hasObject(By.text("• https://images.fixture.invalid:443"))
             }
-            assertTrue("Trust is enabled only after valid HTTPS input.", requireNotNull(device.findObject(By.text("Trust and update"))).isEnabled)
+            assertTrue("Trust is enabled only after valid HTTPS input.", clickableAncestor("Trust and update").isEnabled)
             assertTrue(device.takeScreenshot(File(context.cacheDir, "lnreader-ui-origin-review-preview.png")))
             click("Trust and update")
             waitFor("The authored update was explicitly trusted") { device.hasObject(By.text("Done")) }
@@ -342,11 +344,18 @@ class LnReaderExtensionUiRuntimeTest {
         return null
     }
 
-    private suspend fun scrollUntilVisible(label: String) {
+    private suspend fun scrollUntilVisible(
+        label: String,
+        contains: Boolean = false,
+        startYPercent: Int = 80,
+    ) {
+        val isVisible = {
+            if (contains) device.hasObject(By.textContains(label)) else device.hasObject(By.text(label))
+        }
         try {
             withTimeout(25_000) {
-                while (!device.hasObject(By.text(label))) {
-                    device.swipe(device.displayWidth / 2, device.displayHeight * 4 / 5, device.displayWidth / 2, device.displayHeight / 3, 20)
+                while (!isVisible()) {
+                    device.swipe(device.displayWidth / 2, device.displayHeight * startYPercent / 100, device.displayWidth / 2, device.displayHeight / 3, 20)
                     instrumentation.waitForIdleSync()
                     delay(250)
                 }
@@ -354,6 +363,12 @@ class LnReaderExtensionUiRuntimeTest {
         } catch (timeout: TimeoutCancellationException) {
             throw AssertionError("Timed out waiting for UI text '$label' to become visible", timeout)
         }
+    }
+
+    private fun clickableAncestor(label: String) = run {
+        var ancestor = requireNotNull(device.findObject(By.text(label))) { "Missing UI text: $label" }.parent
+        while (ancestor != null && !ancestor.isClickable) ancestor = ancestor.parent
+        requireNotNull(ancestor) { "UI text '$label' has no clickable control ancestor" }
     }
 
     private fun currentChapterPercent(): Int? {

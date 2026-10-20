@@ -138,10 +138,10 @@ class WebtoonRecyclerView @JvmOverloads constructor(
         isZooming = true
         val animatorSet = AnimatorSet()
         val translationXAnimator = ValueAnimator.ofFloat(fromX, toX)
-        translationXAnimator.addUpdateListener { animation -> x = getPositionX(animation.animatedValue as Float) }
+        translationXAnimator.addUpdateListener { animation -> setZoomTranslation(getPositionX(animation.animatedValue as Float), y) }
 
         val translationYAnimator = ValueAnimator.ofFloat(fromY, toY)
-        translationYAnimator.addUpdateListener { animation -> y = animation.animatedValue as Float }
+        translationYAnimator.addUpdateListener { animation -> setZoomTranslation(x, animation.animatedValue as Float) }
 
         val scaleAnimator = ValueAnimator.ofFloat(fromRate, toRate)
         scaleAnimator.addUpdateListener { animation ->
@@ -155,6 +155,7 @@ class WebtoonRecyclerView @JvmOverloads constructor(
         animatorSet.doOnEnd {
             isZooming = false
             currentScale = toRate
+            invalidateImageViewports()
         }
     }
 
@@ -168,14 +169,14 @@ class WebtoonRecyclerView @JvmOverloads constructor(
             val dx = (distanceTimeFactor * velocityX / 2)
             val newX = getPositionX(x + dx)
             val translationXAnimator = ValueAnimator.ofFloat(x, newX)
-            translationXAnimator.addUpdateListener { animation -> x = getPositionX(animation.animatedValue as Float) }
+            translationXAnimator.addUpdateListener { animation -> setZoomTranslation(getPositionX(animation.animatedValue as Float), y) }
             animatorSet.play(translationXAnimator)
         }
         if (velocityY != 0 && (atFirstPosition || atLastPosition)) {
             val dy = (distanceTimeFactor * velocityY / 2)
             val newY = getPositionY(y + dy)
             val translationYAnimator = ValueAnimator.ofFloat(y, newY)
-            translationYAnimator.addUpdateListener { animation -> y = getPositionY(animation.animatedValue as Float) }
+            translationYAnimator.addUpdateListener { animation -> setZoomTranslation(x, getPositionY(animation.animatedValue as Float)) }
             animatorSet.play(translationYAnimator)
         }
 
@@ -194,12 +195,18 @@ class WebtoonRecyclerView @JvmOverloads constructor(
     }
 
     private fun zoomScrollBy(dx: Int, dy: Int) {
-        if (dx != 0) {
-            x = getPositionX(x + dx)
-        }
-        if (dy != 0) {
-            y = getPositionY(y + dy)
-        }
+        val newX = if (dx != 0) getPositionX(x + dx) else x
+        val newY = if (dy != 0) getPositionY(y + dy) else y
+        setZoomTranslation(newX, newY)
+    }
+
+    private fun setZoomTranslation(newX: Float, newY: Float) {
+        if (x == newX && y == newY) return
+        x = newX
+        y = newY
+        // A transformed RecyclerView can move its children without onScrolled firing (for
+        // example, when panning against an edge). Refresh their tile clips for the new viewport.
+        invalidateImageViewports()
     }
 
     private fun setScaleRate(rate: Float) {
@@ -237,6 +244,7 @@ class WebtoonRecyclerView @JvmOverloads constructor(
     }
 
     fun onScaleBegin() {
+        zoomFlingAnimator?.cancel()
         if (detector.isDoubleTapping) {
             detector.isQuickScaling = true
         }

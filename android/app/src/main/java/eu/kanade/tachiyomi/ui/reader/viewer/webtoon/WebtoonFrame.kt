@@ -26,6 +26,10 @@ class WebtoonFrame(context: Context) : FrameLayout(context) {
      */
     private val flingDetector = GestureDetector(context, FlingListener())
 
+    /** A transformed child must not inherit the coordinate stream that changed its transform. */
+    private var suppressChildTouchUntilUp = false
+    private var childTouchActive = false
+
     var doubleTapZoom = true
         set(value) {
             field = value
@@ -49,8 +53,29 @@ class WebtoonFrame(context: Context) : FrameLayout(context) {
      * Dispatches a touch event to the detectors.
      */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            suppressChildTouchUntilUp = false
+            childTouchActive = false
+        }
+
         scaleDetector.onTouchEvent(ev)
-        flingDetector.onTouchEvent(ev)
+
+        // A scale gesture changes the RecyclerView's matrix while Android is still mapping the
+        // same MotionEvent stream into that child. Cancel that stream once, then let the next
+        // independent one-finger gesture begin against the settled matrix.
+        val startsOrContinuesScale = ev.actionMasked == MotionEvent.ACTION_POINTER_DOWN || scaleDetector.isInProgress
+        if (startsOrContinuesScale && !suppressChildTouchUntilUp) {
+            suppressChildTouchUntilUp = true
+            val cancel = MotionEvent.obtain(ev)
+            cancel.action = MotionEvent.ACTION_CANCEL
+            try {
+                flingDetector.onTouchEvent(cancel)
+            } finally {
+                cancel.recycle()
+            }
+        } else if (!suppressChildTouchUntilUp) {
+            flingDetector.onTouchEvent(ev)
+        }
 
         // Get the bounding box of the recyclerview and translate any motion events to be within it.
         // Used to allow scrolling outside the recyclerview.
@@ -67,7 +92,30 @@ class WebtoonFrame(context: Context) : FrameLayout(context) {
             ev.x.coerceIn(recyclerRect.left.toFloat(), recyclerRect.right.toFloat()),
             ev.y.coerceIn(recyclerRect.top.toFloat(), recyclerRect.bottom.toFloat()),
         )
-        return super.dispatchTouchEvent(ev)
+
+        if (suppressChildTouchUntilUp) {
+            if (childTouchActive) {
+                val cancel = MotionEvent.obtain(ev)
+                cancel.action = MotionEvent.ACTION_CANCEL
+                try {
+                    super.dispatchTouchEvent(cancel)
+                } finally {
+                    cancel.recycle()
+                }
+                childTouchActive = false
+            }
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) {
+                suppressChildTouchUntilUp = false
+            }
+            return true
+        }
+
+        val handled = super.dispatchTouchEvent(ev)
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> childTouchActive = handled
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> childTouchActive = false
+        }
+        return handled
     }
 
     /**
