@@ -485,7 +485,15 @@ class MainActivity : BaseActivity() {
             )
         }
 
+        if (intent.action == mihon.readingapp.widget.ContinueReadingWidget.ACTION) {
+            val key = intent.getStringExtra(mihon.readingapp.widget.ContinueReadingWidget.KEY)
+            intent.removeExtra(mihon.readingapp.widget.ContinueReadingWidget.KEY)
+            lifecycleScope.launch {
+                runCatching { mihon.readingapp.widget.ContinueReadingWidget.resume(this@MainActivity, key) { navigator.push(it) } }
+            }
+        }
         val tabToOpen = when (intent.action) {
+            mihon.readingapp.widget.ContinueReadingWidget.ACTION -> HomeScreen.Tab.Library()
             Constants.SHORTCUT_LIBRARY -> HomeScreen.Tab.Library()
             Constants.SHORTCUT_MANGA -> {
                 val idToOpen = intent.extras?.getLong(Constants.MANGA_EXTRA) ?: return false

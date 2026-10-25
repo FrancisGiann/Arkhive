@@ -149,6 +149,7 @@ interface AppGraph : ViewModelGraph {
     val javaScriptEngine: JavaScriptEngine
 
     val getLibraryManga: tachiyomi.domain.manga.interactor.GetLibraryManga
+    val widgetHistory: tachiyomi.domain.history.interactor.GetHistory
     val getNextChapters: tachiyomi.domain.history.interactor.GetNextChapters
 
     val mangaRepository: tachiyomi.domain.manga.repository.MangaRepository

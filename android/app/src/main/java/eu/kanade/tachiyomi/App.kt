@@ -206,6 +206,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         setAppCompatDelegateThemeMode(themeMode)
         // Updates widget update
         widgetManager.init(scope)
+        mihon.readingapp.widget.ContinueReadingWidget.observe(this, scope)
 
         if (!LogcatLogger.isInstalled) {
             val minLogPriority = when {
