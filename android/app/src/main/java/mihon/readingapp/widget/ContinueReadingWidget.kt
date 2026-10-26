@@ -13,6 +13,8 @@ import eu.kanade.presentation.theme.getThemeColorScheme
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Path
 import android.view.View
@@ -30,9 +32,21 @@ import mihon.app.di.appGraph
 import mihon.readingapp.books.BookReaderActivity
 import mihon.readingapp.novels.NovelReaderActivity
 import java.util.Locale
+import kotlin.math.roundToInt
 
 internal data class ContinueStory(val key: String, val title: String, val author: String,
     val kind: String, val cover: Any?, val progress: Double, val status: String, val lastRead: Long)
+
+internal data class ContinueReadingRequest(val key: String?)
+
+/** Consume a widget launch before navigation so warm and restored activities cannot replay it. */
+internal fun Intent.takeContinueReadingRequest(): ContinueReadingRequest? {
+    if (action != ContinueReadingWidget.ACTION) return null
+    val request = ContinueReadingRequest(getStringExtra(ContinueReadingWidget.KEY))
+    removeExtra(ContinueReadingWidget.KEY)
+    action = Intent.ACTION_MAIN
+    return request
+}
 
 /** Launcher content is derived from visible library membership; no private snapshot on disk. */
 open class ContinueReadingWidget : AppWidgetProvider() {
@@ -48,6 +62,39 @@ open class ContinueReadingWidget : AppWidgetProvider() {
     companion object {
         const val ACTION = "arkhive.CONTINUE_READING"
         const val KEY = "continue_story"
+
+        /** A cover-led compact card with an opaque footer, drawn as one rounded bitmap. */
+        private fun compactBackground(context: Context, cover: Bitmap?, width: Int, height: Int, accent: Int): Bitmap {
+            val density = context.resources.displayMetrics.density.coerceIn(1f, 2.5f)
+            val result = Bitmap.createBitmap((width * density).roundToInt(), (height * density).roundToInt(), Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(result)
+            canvas.scale(density, density)
+            canvas.clipPath(Path().apply {
+                addRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 18f, 18f, Path.Direction.CW)
+            })
+            if (cover != null && cover.width > 0 && cover.height > 0) {
+                // Center-crop without stretching the book cover.
+                val sourceAspect = cover.width.toFloat() / cover.height
+                val targetAspect = width.toFloat() / height
+                val cropWidth = if (sourceAspect > targetAspect) (cover.height * targetAspect).roundToInt().coerceIn(1, cover.width) else cover.width
+                val cropHeight = if (sourceAspect > targetAspect) cover.height else (cover.width / targetAspect).roundToInt().coerceIn(1, cover.height)
+                val left = (cover.width - cropWidth) / 2
+                val top = (cover.height - cropHeight) / 2
+                canvas.drawBitmap(cover, Rect(left, top, left + cropWidth, top + cropHeight),
+                    RectF(0f, 0f, width.toFloat(), height.toFloat()), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            } else {
+                canvas.drawColor(androidx.core.graphics.ColorUtils.blendARGB(accent, Color.rgb(34, 29, 54), .62f))
+                runCatching { context.getDrawable(R.drawable.readingapp_icon)?.toBitmap(42, 42) }.getOrNull()?.let { icon ->
+                    val centerX = width / 2f
+                    val centerY = (height - 61f) / 2f
+                    canvas.drawBitmap(icon, null, RectF(centerX - 21f, centerY - 21f, centerX + 21f, centerY + 21f),
+                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                }
+            }
+            canvas.drawRect(0f, height - 61f, width.toFloat(), height.toFloat(),
+                Paint().apply { color = Color.rgb(37, 30, 60) })
+            return result
+        }
 
         fun observe(context: Context, scope: CoroutineScope) {
             val g = context.appGraph
@@ -116,8 +163,8 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                     .coerceIn(if (compact) 110 else 250, 600)
                 val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, if (compact) 110 else 220)
                     .coerceIn(if (compact) 110 else 200, 400)
-                val background = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                Canvas(background).apply {
+                val background = if (compact) compactBackground(context, bitmap, width, height, scheme.primary.toArgb())
+                    else Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { largeBackground -> Canvas(largeBackground).apply {
                     drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 20f, 20f,
                         Paint(Paint.ANTI_ALIAS_FLAG).apply { color = scheme.primary.toArgb() })
                     clipPath(Path().apply { addRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 20f, 20f, Path.Direction.CW) })
@@ -130,26 +177,29 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                         lineTo((319f + offset) * unit, 0f)
                         close()
                     }, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = (ink and 0x00FFFFFF) or 0x29000000 })
-                }
+                } }
                 view.setImageViewBitmap(R.id.continue_background, background)
                 listOf(R.id.continue_label, R.id.continue_title, R.id.continue_author,
-                    R.id.continue_status).forEach { view.setTextColor(it, ink) }
+                    R.id.continue_status).forEach { view.setTextColor(it, if (compact) Color.WHITE else ink) }
                 val pill = Bitmap.createBitmap(88, 28, Bitmap.Config.ARGB_8888)
                 Canvas(pill).drawRoundRect(RectF(0f, 0f, 88f, 28f), 8f, 8f,
                     Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink })
                 view.setImageViewBitmap(R.id.continue_kind_background, pill)
                 view.setTextColor(R.id.continue_kind, scheme.primary.toArgb())
                 val arrow = Bitmap.createBitmap(40, 40, Bitmap.Config.ARGB_8888)
-                Canvas(arrow).drawCircle(20f, 20f, 20f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink })
+                Canvas(arrow).drawCircle(20f, 20f, 20f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = if (compact) scheme.primary.toArgb() else ink
+                })
                 view.setImageViewBitmap(R.id.continue_arrow_background, arrow)
-                view.setTextColor(R.id.continue_arrow, scheme.primary.toArgb())
+                view.setTextColor(R.id.continue_arrow, if (compact) ink else scheme.primary.toArgb())
                 val largeText = context.resources.configuration.fontScale > 1.3f
-                view.setInt(R.id.continue_title, "setMaxLines", if (compact || largeText) 2 else 3)
-                view.setViewVisibility(R.id.continue_label, if (compact && largeText) View.GONE else View.VISIBLE)
+                val tightCompact = compact && (width < 145 || height < 140 || largeText)
+                view.setInt(R.id.continue_title, "setMaxLines", if (tightCompact) 1 else if (compact || largeText) 2 else 3)
+                view.setViewVisibility(R.id.continue_label, if (compact) View.GONE else View.VISIBLE)
                 view.setViewVisibility(R.id.continue_author, if (compact || largeText) View.GONE else View.VISIBLE)
-                // A category badge fits beside the cover only when the compact card has room.
-                val showKind = !largeText && (!compact || (story != null && width >= 150 && height >= 150))
+                val showKind = !compact && !largeText
                 view.setViewVisibility(R.id.continue_kind_container, if (showKind) View.VISIBLE else View.GONE)
+                view.setViewVisibility(R.id.continue_status, if (tightCompact) View.GONE else View.VISIBLE)
                 val title = story?.title ?: if (locked) "YOUR LIBRARY IS LOCKED" else "YOUR NEXT CHAPTER"
                 view.setTextViewText(R.id.continue_title, if (compact) title else title.uppercase(Locale.getDefault()))
                 view.setTextViewText(R.id.continue_author, story?.author ?: if (locked) "Open Arkhive to unlock" else "Start a story in Arkhive")
@@ -157,15 +207,15 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                 view.setTextViewText(R.id.continue_status, story?.status ?: "Pick up where you left off")
                 // A bounded native meter keeps app palette colors on API 26+ as well as modern launchers.
                 val meter = Bitmap.createBitmap(320, 3, Bitmap.Config.ARGB_8888)
-                meter.eraseColor(androidx.core.graphics.ColorUtils.blendARGB(scheme.primary.toArgb(), ink, .3f))
+                meter.eraseColor(if (compact) Color.rgb(90, 76, 112) else
+                    androidx.core.graphics.ColorUtils.blendARGB(scheme.primary.toArgb(), ink, .3f))
                 Canvas(meter).drawRect(0f, 0f, (320 * (story?.progress ?: 0.0).coerceIn(0.0, 1.0)).toFloat(), 3f,
-                    Paint().apply { color = ink })
+                    Paint().apply { color = if (compact) Color.rgb(216, 163, 255) else ink })
                 view.setImageViewBitmap(R.id.continue_progress, meter)
                 view.setImageViewResource(R.id.continue_cover, R.drawable.readingapp_icon)
                 if (bitmap != null) view.setImageViewBitmap(R.id.continue_cover, bitmap)
-                // The square fallback icon would consume most of a two-column widget.
-                // Empty and coverless compact cards keep the reading details full width.
-                if (compact) view.setViewVisibility(R.id.continue_cover, if (bitmap != null) View.VISIBLE else View.GONE)
+                // Compact artwork and its empty-state icon are part of the rounded background.
+                if (compact) view.setViewVisibility(R.id.continue_cover, View.GONE)
                 view.setContentDescription(R.id.continue_cover, story?.let { "Cover of ${it.title}" } ?: "Arkhive")
                 view.setContentDescription(R.id.continue_root, story?.let { "Resume ${it.title}. ${it.status}" } ?: "Open Arkhive library")
                 val intent = Intent(context, MainActivity::class.java).setAction(ACTION)
@@ -178,31 +228,39 @@ open class ContinueReadingWidget : AppWidgetProvider() {
         }
 
         /** Called only through the normal MainActivity. Revalidate stale launcher intents. */
-        suspend fun resume(context: Context, key: String?, detail: (eu.kanade.presentation.util.Screen) -> Unit) {
+        suspend fun resume(context: Context, key: String?, detail: (eu.kanade.presentation.util.Screen) -> Unit): Boolean {
             val g = context.appGraph
-            if (key == null || g.securityPreferences.useAuthenticator.get() || g.libraryVisibility.isHidden(key)) return
-            if (stories(context).none { it.key == key }) return
+            if (key == null || g.securityPreferences.useAuthenticator.get() || g.libraryVisibility.isHidden(key)) return false
+            if (stories(context).none { it.key == key }) return false
             val id = key.substringAfter(':')
-            when (key.substringBefore(':')) {
+            return when (key.substringBefore(':')) {
                 "manga" -> {
-                    val mangaId = id.toLongOrNull() ?: return
+                    val mangaId = id.toLongOrNull() ?: return false
                     val latest = g.widgetHistory.await(mangaId).maxByOrNull { it.readAt?.toEpochMilliseconds() ?: 0 }
                     val chapter = selectContinueChapter(g.getNextChapters.await(mangaId, onlyUnread = false), latest?.chapterId)
-                    if (g.securityPreferences.useAuthenticator.get() || g.libraryVisibility.isHidden(key)) return
+                    if (g.securityPreferences.useAuthenticator.get() || g.libraryVisibility.isHidden(key)) return false
                     if (chapter == null) detail(eu.kanade.tachiyomi.ui.manga.MangaScreen(mangaId))
                     else context.startActivity(ReaderActivity.newIntent(context, mangaId, chapter.id))
+                    true
                 }
-                "book" -> if (g.localBookRepository.get(id) != null) context.startActivity(
-                    Intent(context, BookReaderActivity::class.java).putExtra(BookReaderActivity.BOOK_ID, id))
+                "book" -> if (g.localBookRepository.get(id) != null) {
+                    context.startActivity(Intent(context, BookReaderActivity::class.java).putExtra(BookReaderActivity.BOOK_ID, id))
+                    true
+                } else false
                 "novel" -> g.novelRepository.get(id)?.let { n ->
                     val chapters = g.novelRepository.chapters(id)
-                    if (chapters.isEmpty()) { detail(mihon.readingapp.novels.NovelDetailScreen(n.sourceId, n.detail.path)); return }
+                    if (chapters.isEmpty()) {
+                        detail(mihon.readingapp.novels.NovelDetailScreen(n.sourceId, n.detail.path))
+                        return true
+                    }
                     val current = chapters.firstOrNull { it.id == n.lastChapter }
                         ?: chapters.firstOrNull { it.progression < 1.0 } ?: chapters.first()
-                    val next = if (current != null && current.progression >= 1.0)
+                    val next = if (current.progression >= 1.0)
                         chapters.firstOrNull { it.position > current.position && it.progression < 1.0 } ?: current else current
-                    context.startActivity(NovelReaderActivity.intent(context, id, next?.id))
-                }
+                    context.startActivity(NovelReaderActivity.intent(context, id, next.id))
+                    true
+                } ?: false
+                else -> false
             }
         }
     }

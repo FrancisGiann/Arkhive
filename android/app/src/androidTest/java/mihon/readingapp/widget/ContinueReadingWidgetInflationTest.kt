@@ -15,6 +15,7 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -22,6 +23,20 @@ import org.junit.runner.RunWith
 /** Catches views and RemoteViews actions that a launcher cannot inflate. */
 @RunWith(AndroidJUnit4::class)
 class ContinueReadingWidgetInflationTest {
+    @Test
+    fun widgetRequestCarriesTheResumeKeyOnlyOnce() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = Intent(context, MainActivity::class.java).setAction(ContinueReadingWidget.ACTION)
+            .putExtra(ContinueReadingWidget.KEY, "manga:42")
+        assertEquals("manga:42", intent.takeContinueReadingRequest()?.key)
+        assertEquals(Intent.ACTION_MAIN, intent.action)
+        assertNull(intent.getStringExtra(ContinueReadingWidget.KEY))
+        assertNull(intent.takeContinueReadingRequest())
+        val empty = Intent(context, MainActivity::class.java).setAction(ContinueReadingWidget.ACTION)
+        assertNull(empty.takeContinueReadingRequest()?.key)
+        assertEquals(Intent.ACTION_MAIN, empty.action)
+    }
+
     @Test
     fun largeAndTwoByTwoLayoutsInflateWithContentThenRefreshToEmpty() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -41,7 +56,10 @@ class ContinueReadingWidgetInflationTest {
                 setImageViewBitmap(R.id.continue_progress, tinyImage)
                 setImageViewBitmap(R.id.continue_arrow_background, tinyImage)
                 setImageViewBitmap(R.id.continue_kind_background, tinyImage)
-                setImageViewBitmap(R.id.continue_cover, portraitCover)
+                if (layout == R.layout.continue_reading_widget_compact) {
+                    setViewVisibility(R.id.continue_cover, View.GONE)
+                    setViewVisibility(R.id.continue_label, View.GONE)
+                } else setImageViewBitmap(R.id.continue_cover, portraitCover)
                 setContentDescription(R.id.continue_root, "Resume reading")
                 setOnClickPendingIntent(R.id.continue_root, click)
             }
@@ -51,6 +69,10 @@ class ContinueReadingWidgetInflationTest {
                 rendered.findViewById<TextView>(R.id.continue_title).text.toString())
             if (layout == R.layout.continue_reading_widget_compact) {
                 for ((width, height) in listOf(110 to 110, 160 to 176)) {
+                    RemoteViews(context.packageName, layout).apply {
+                        setInt(R.id.continue_title, "setMaxLines", if (width == 110) 1 else 2)
+                        setViewVisibility(R.id.continue_status, if (width == 110) View.GONE else View.VISIBLE)
+                    }.reapply(context, rendered)
                     val density = context.resources.displayMetrics.density
                     val widthPx = (width * density).toInt()
                     val heightPx = (height * density).toInt()
@@ -59,18 +81,21 @@ class ContinueReadingWidgetInflationTest {
                         View.MeasureSpec.makeMeasureSpec(heightPx, View.MeasureSpec.EXACTLY),
                     )
                     rendered.layout(0, 0, widthPx, heightPx)
-                    val cover = rendered.findViewById<View>(R.id.continue_cover)
+                    val title = rendered.findViewById<View>(R.id.continue_title)
+                    val progress = rendered.findViewById<View>(R.id.continue_progress)
                     val status = rendered.findViewById<View>(R.id.continue_status)
                     val arrow = rendered.findViewById<View>(R.id.continue_arrow)
                     fun bounds(view: View) = Rect(0, 0, view.width, view.height).also {
                         (rendered as ViewGroup).offsetDescendantRectToMyCoords(view, it)
                     }
-                    assertTrue("cover fits the two-column card", bounds(cover).right < bounds(status).left)
-                    assertTrue("cover stays inside the card", bounds(cover).bottom <= heightPx)
-                    assertTrue("reading status clears the arrow", bounds(status).bottom <= bounds(arrow).top)
-                    if (height == 176) {
-                        assertTrue("portrait art fills the roomy 2×2 card", cover.height > (80 * density).toInt())
-                    }
+                    assertEquals("art is embedded in the rounded compact background", View.GONE,
+                        rendered.findViewById<View>(R.id.continue_cover).visibility)
+                    assertTrue("title stays inside the card", bounds(title).bottom <= heightPx)
+                    assertTrue("progress stays inside the card", bounds(progress).bottom <= heightPx)
+                    assertTrue("arrow stays inside the card", bounds(arrow).bottom <= heightPx)
+                    assertTrue("progress clears the arrow", bounds(progress).right < bounds(arrow).left)
+                    if (width == 110) assertTrue("one-line title clears the action", bounds(title).bottom <= bounds(arrow).top)
+                    else assertTrue("status clears the meter", bounds(status).bottom <= bounds(progress).top)
                 }
             }
 

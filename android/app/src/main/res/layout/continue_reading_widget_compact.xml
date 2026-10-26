@@ -1,25 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/continue_root" android:layout_width="match_parent" android:layout_height="match_parent">
-    <ImageView android:id="@+id/continue_background" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitXY" android:importantForAccessibility="no"/>
-    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="6dp">
-        <TextView android:id="@+id/continue_label" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="CONTINUE READING" android:fontFamily="@font/ink_body" android:textStyle="bold" android:textSize="8sp" android:letterSpacing="0.07" android:maxLines="1"/>
-        <TextView android:id="@+id/continue_title" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:fontFamily="@font/ink_display" android:textSize="11sp" android:maxLines="2" android:ellipsize="end"/>
-        <TextView android:id="@+id/continue_author" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone"/>
-        <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="3dp" android:orientation="horizontal">
-            <ImageView android:id="@+id/continue_cover" android:layout_width="wrap_content" android:layout_height="match_parent" android:maxWidth="76dp" android:adjustViewBounds="true" android:layout_marginEnd="5dp" android:scaleType="fitCenter" android:importantForAccessibility="no"/>
-            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:paddingBottom="28dp" android:orientation="vertical">
-                <FrameLayout android:id="@+id/continue_kind_container" android:layout_width="60dp" android:layout_height="18dp" android:visibility="gone">
-                    <ImageView android:id="@+id/continue_kind_background" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitXY" android:importantForAccessibility="no"/>
-                    <TextView android:id="@+id/continue_kind" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:textStyle="bold" android:textSize="7sp" android:maxLines="1" android:ellipsize="end"/>
-                </FrameLayout>
-                <TextView android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1" android:importantForAccessibility="no"/>
-                <ImageView android:id="@+id/continue_progress" android:layout_width="match_parent" android:layout_height="2dp" android:scaleType="fitXY" android:importantForAccessibility="no"/>
-                <TextView android:id="@+id/continue_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:textSize="8sp" android:maxLines="2" android:ellipsize="end"/>
-            </LinearLayout>
-        </LinearLayout>
-    </LinearLayout>
-    <FrameLayout android:layout_width="26dp" android:layout_height="26dp" android:layout_gravity="bottom|end" android:layout_margin="6dp" android:importantForAccessibility="no">
-        <ImageView android:id="@+id/continue_arrow_background" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitXY" android:importantForAccessibility="no"/>
-        <TextView android:id="@+id/continue_arrow" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:text="➜" android:textSize="16sp" android:importantForAccessibility="no"/>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/continue_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <!-- Artwork and the dark reading footer are rendered together to keep rounded corners on launchers. -->
+    <ImageView android:id="@+id/continue_background"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="fitXY" android:importantForAccessibility="no"/>
+    <!-- Retained for RemoteViews actions shared with the large widget; compact artwork is in the background. -->
+    <ImageView android:id="@+id/continue_cover" android:layout_width="1dp" android:layout_height="1dp"
+        android:visibility="gone" android:importantForAccessibility="no"/>
+    <TextView android:id="@+id/continue_label" android:layout_width="1dp" android:layout_height="1dp"
+        android:visibility="gone" android:importantForAccessibility="no"/>
+    <TextView android:id="@+id/continue_author" android:layout_width="1dp" android:layout_height="1dp"
+        android:visibility="gone" android:importantForAccessibility="no"/>
+    <FrameLayout android:id="@+id/continue_kind_container" android:layout_width="1dp" android:layout_height="1dp"
+        android:visibility="gone" android:importantForAccessibility="no">
+        <ImageView android:id="@+id/continue_kind_background" android:layout_width="match_parent" android:layout_height="match_parent"/>
+        <TextView android:id="@+id/continue_kind" android:layout_width="match_parent" android:layout_height="match_parent"/>
+    </FrameLayout>
+    <FrameLayout android:layout_width="match_parent" android:layout_height="61dp" android:layout_gravity="bottom">
+        <TextView android:id="@+id/continue_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginStart="8dp" android:layout_marginEnd="8dp" android:layout_marginTop="6dp"
+            android:fontFamily="@font/ink_display" android:textSize="11sp" android:maxLines="2"
+            android:ellipsize="end" android:text="Continue reading"/>
+        <TextView android:id="@+id/continue_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_gravity="bottom" android:layout_marginStart="8dp" android:layout_marginEnd="39dp"
+            android:layout_marginBottom="17dp" android:textSize="8sp" android:maxLines="1" android:ellipsize="end"/>
+        <ImageView android:id="@+id/continue_progress" android:layout_width="match_parent" android:layout_height="3dp"
+            android:layout_gravity="bottom" android:layout_marginStart="8dp" android:layout_marginEnd="39dp"
+            android:layout_marginBottom="8dp" android:scaleType="fitXY" android:importantForAccessibility="no"/>
+    </FrameLayout>
+    <FrameLayout android:layout_width="28dp" android:layout_height="28dp"
+        android:layout_gravity="bottom|end" android:layout_margin="7dp" android:importantForAccessibility="no">
+        <ImageView android:id="@+id/continue_arrow_background" android:layout_width="match_parent"
+            android:layout_height="match_parent" android:scaleType="fitXY"/>
+        <TextView android:id="@+id/continue_arrow" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:gravity="center" android:text="➜" android:textSize="18sp"/>
     </FrameLayout>
 </FrameLayout>

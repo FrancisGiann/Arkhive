@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -60,9 +59,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.util.Consumer
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.interpolator.view.animation.LinearOutSlowInInterpolator
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.NavigatorDisposeBehavior
@@ -90,15 +87,12 @@ import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.deeplink.DeepLinkScreen
 import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
-import eu.kanade.tachiyomi.ui.more.NewUpdateScreen
 import eu.kanade.tachiyomi.ui.more.OnboardingScreen
 import eu.kanade.tachiyomi.ui.setting.SettingsScreen
 import eu.kanade.tachiyomi.util.system.dpToPx
 import eu.kanade.tachiyomi.util.system.isBenchmarkBuildType
 import eu.kanade.tachiyomi.util.system.isNavigationBarNeedsScrim
-import eu.kanade.tachiyomi.util.system.updaterEnabled
 import eu.kanade.tachiyomi.util.view.setComposeContent
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -113,6 +107,7 @@ import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.app.di.AppGraph
 import mihon.app.di.appGraph
+import mihon.readingapp.widget.takeContinueReadingRequest
 import mihon.core.metro.metroGraph
 import mihon.core.migration.Migrator
 import mihon.domain.database.repository.DatabaseRepository
@@ -123,7 +118,6 @@ import mihon.icons.materialsymbols.roundedfilled.VolunteerActivism
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.library.service.LibraryPreferences
-import tachiyomi.domain.release.interactor.GetApplicationRelease
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
@@ -131,7 +125,6 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.time.TimeSource
@@ -241,12 +234,11 @@ class MainActivity : BaseActivity() {
                 LaunchedEffect(navigator) {
                     this@MainActivity.navigator = navigator
 
-                    if (isLaunch) {
-                        // Set start screen
+                    if (isLaunch || intent.action == mihon.readingapp.widget.ContinueReadingWidget.ACTION) {
+                        // A restored activity can still be opened from a launcher widget.
                         handleIntentAction(intent, navigator)
 
-                        // Reset Incognito Mode on relaunch
-                        preferences.incognitoMode.set(false)
+                        if (isLaunch) preferences.incognitoMode.set(false)
                     }
                 }
                 LaunchedEffect(navigator.lastItem) {
@@ -310,7 +302,7 @@ class MainActivity : BaseActivity() {
                 HandleOnNewIntent(context = context, navigator = navigator)
 
                 if (!isBenchmarkBuildType) {
-                    if (isLaunch) CheckForUpdates()
+                    if (isLaunch) CheckExtensionUpdates()
                     ShowOnboarding()
                     ShowDonationCampaign()
                 }
@@ -328,6 +320,16 @@ class MainActivity : BaseActivity() {
             lifecycleScope.launch(Dispatchers.IO) {
                 chapterCache.clear()
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // The Compose intent collector may not yet be installed when a widget
+        // reopens a warm task. handleIntentAction consumes the action once.
+        if (intent.action == mihon.readingapp.widget.ContinueReadingWidget.ACTION) {
+            navigator?.let { handleIntentAction(intent, it) }
         }
     }
 
@@ -364,47 +366,9 @@ class MainActivity : BaseActivity() {
     }
 
     @Composable
-    private fun CheckForUpdates() {
-        val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow
-
-        // App updates
-        LaunchedEffect(Unit) {
-            if (!updaterEnabled) return@LaunchedEffect
-            var lastCheck: Long? = null
-            // The app can stay open for days now, so a cold start alone rarely checks.
-            // Elapsed realtime keeps counting while the device sleeps, unlike the monotonic clock.
-            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (true) {
-                    lastCheck?.let {
-                        delay(it + APP_UPDATE_CHECK_INTERVAL.inWholeMilliseconds - SystemClock.elapsedRealtime())
-                    }
-                    lastCheck = SystemClock.elapsedRealtime()
-                    try {
-                        val result = context.appGraph.updateChecker.checkForUpdate()
-                        if (
-                            result is GetApplicationRelease.Result.NewUpdate &&
-                            result.release.version != preferences.skippedAppUpdate.get() &&
-                            navigator.items.none { it is NewUpdateScreen }
-                        ) {
-                            val updateScreen = NewUpdateScreen(
-                                versionName = result.release.version,
-                                changelogInfo = result.release.info,
-                                releaseLink = result.release.releaseLink,
-                                downloadLink = result.release.downloadLink,
-                            )
-                            navigator.push(updateScreen)
-                        }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        logcat(LogPriority.ERROR, e)
-                    }
-                }
-            }
-        }
-
-        // Extensions updates
+    private fun CheckExtensionUpdates() {
+        // App updates use the separate, verified manual Arkhive updater. Keep
+        // extension checks, which use their own repository and package flow.
         LaunchedEffect(Unit) {
             try {
                 extensionManager.checkForUpdates()
@@ -485,15 +449,18 @@ class MainActivity : BaseActivity() {
             )
         }
 
-        if (intent.action == mihon.readingapp.widget.ContinueReadingWidget.ACTION) {
-            val key = intent.getStringExtra(mihon.readingapp.widget.ContinueReadingWidget.KEY)
-            intent.removeExtra(mihon.readingapp.widget.ContinueReadingWidget.KEY)
+        val widgetRequest = intent.takeContinueReadingRequest()
+        if (widgetRequest != null) {
+            ready = true
             lifecycleScope.launch {
-                runCatching { mihon.readingapp.widget.ContinueReadingWidget.resume(this@MainActivity, key) { navigator.push(it) } }
+                val resumed = runCatching {
+                    mihon.readingapp.widget.ContinueReadingWidget.resume(this@MainActivity, widgetRequest.key) { navigator.push(it) }
+                }.onFailure { logcat(LogPriority.ERROR, it) }.getOrDefault(false)
+                if (!resumed) HomeScreen.openTab(HomeScreen.Tab.Library())
             }
+            return true
         }
         val tabToOpen = when (intent.action) {
-            mihon.readingapp.widget.ContinueReadingWidget.ACTION -> HomeScreen.Tab.Library()
             Constants.SHORTCUT_LIBRARY -> HomeScreen.Tab.Library()
             Constants.SHORTCUT_MANGA -> {
                 val idToOpen = intent.extras?.getLong(Constants.MANGA_EXTRA) ?: return false
@@ -578,4 +545,3 @@ private const val SPLASH_MAX_DURATION = 5000 // ms
 private const val SPLASH_EXIT_ANIM_DURATION = 400L // ms
 
 private val MIGRATING_SCREEN_MIN_DURATION = 1.seconds
-private val APP_UPDATE_CHECK_INTERVAL = 6.hours

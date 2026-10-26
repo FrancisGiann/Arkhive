@@ -39,8 +39,8 @@ android {
     defaultConfig {
         applicationId = "dev.francisgiann.readingapp"
 
-        versionCode = 19
-        versionName = "0.4.12"
+        versionCode = 20
+        versionName = "0.4.13"
 
         buildConfigField("boolean", "TELEMETRY_INCLUDED", "${Config.includeTelemetry}")
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
