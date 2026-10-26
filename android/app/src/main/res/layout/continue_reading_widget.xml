@@ -11,7 +11,7 @@
 <FrameLayout android:id="@+id/continue_kind_container" android:layout_width="88dp" android:layout_height="28dp" android:layout_marginTop="5dp">
 <ImageView android:id="@+id/continue_kind_background" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitXY" android:importantForAccessibility="no"/>
 <TextView android:id="@+id/continue_kind" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:textStyle="bold" android:textSize="9sp" android:maxLines="1" android:ellipsize="end"/>
-</FrameLayout><Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
+</FrameLayout><TextView android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1" android:importantForAccessibility="no"/>
 <ImageView android:id="@+id/continue_progress" android:layout_width="match_parent" android:layout_height="3dp" android:scaleType="fitXY" android:importantForAccessibility="no"/>
 <TextView android:id="@+id/continue_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:paddingEnd="35dp" android:textSize="11sp" android:maxLines="2" android:ellipsize="end"/>
 </LinearLayout></LinearLayout></LinearLayout>

@@ -112,8 +112,10 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                 val scheme = getThemeColorScheme(context, g.uiPreferences.appTheme.get(), dark, g.uiPreferences.themeDarkAmoled.get())
                 val ink = scheme.onPrimary.toArgb()
                 val options = manager.getAppWidgetOptions(id)
-                val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, if (compact) 250 else 280).coerceIn(180, 600)
-                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, if (compact) 110 else 220).coerceIn(90, 400)
+                val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, if (compact) 110 else 280)
+                    .coerceIn(if (compact) 110 else 250, 600)
+                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, if (compact) 110 else 220)
+                    .coerceIn(if (compact) 110 else 200, 400)
                 val background = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 Canvas(background).apply {
                     drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 20f, 20f,
@@ -142,10 +144,12 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                 view.setImageViewBitmap(R.id.continue_arrow_background, arrow)
                 view.setTextColor(R.id.continue_arrow, scheme.primary.toArgb())
                 val largeText = context.resources.configuration.fontScale > 1.3f
-                view.setInt(R.id.continue_title, "setMaxLines", if (compact) 2 else if (largeText) 2 else 3)
+                view.setInt(R.id.continue_title, "setMaxLines", if (compact || largeText) 2 else 3)
+                view.setViewVisibility(R.id.continue_label, if (compact && largeText) View.GONE else View.VISIBLE)
                 view.setViewVisibility(R.id.continue_author, if (compact || largeText) View.GONE else View.VISIBLE)
-                view.setViewVisibility(R.id.continue_kind_container, if (largeText) View.GONE else View.VISIBLE)
-                view.setTextViewText(R.id.continue_title, story?.title?.uppercase(Locale.getDefault()) ?: if (locked) "YOUR LIBRARY IS LOCKED" else "YOUR NEXT CHAPTER")
+                view.setViewVisibility(R.id.continue_kind_container, if (compact || largeText) View.GONE else View.VISIBLE)
+                val title = story?.title ?: if (locked) "YOUR LIBRARY IS LOCKED" else "YOUR NEXT CHAPTER"
+                view.setTextViewText(R.id.continue_title, if (compact) title else title.uppercase(Locale.getDefault()))
                 view.setTextViewText(R.id.continue_author, story?.author ?: if (locked) "Open Arkhive to unlock" else "Start a story in Arkhive")
                 view.setTextViewText(R.id.continue_kind, story?.kind ?: "ARKHIVE")
                 view.setTextViewText(R.id.continue_status, story?.status ?: "Pick up where you left off")
