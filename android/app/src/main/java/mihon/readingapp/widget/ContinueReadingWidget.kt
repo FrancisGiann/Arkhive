@@ -35,7 +35,7 @@ internal data class ContinueStory(val key: String, val title: String, val author
     val kind: String, val cover: Any?, val progress: Double, val status: String, val lastRead: Long)
 
 /** Launcher content is derived from visible library membership; no private snapshot on disk. */
-class ContinueReadingWidget : AppWidgetProvider() {
+open class ContinueReadingWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
@@ -88,8 +88,9 @@ class ContinueReadingWidget : AppWidgetProvider() {
 
         suspend fun refresh(context: Context) {
             val manager = AppWidgetManager.getInstance(context)
-            val ids = manager.getAppWidgetIds(ComponentName(context, ContinueReadingWidget::class.java))
-            if (ids.isEmpty()) return
+            val largeIds = manager.getAppWidgetIds(ComponentName(context, ContinueReadingWidget::class.java))
+            val compactIds = manager.getAppWidgetIds(ComponentName(context, ContinueReadingCompactWidget::class.java))
+            if (largeIds.isEmpty() && compactIds.isEmpty()) return
             val g = context.appGraph
             val locked = g.securityPreferences.useAuthenticator.get()
             val story = if (locked) null else runCatching { selectContinueStory(stories(context), g.libraryVisibility.hiddenSeries.get()) }.getOrNull()
@@ -101,8 +102,8 @@ class ContinueReadingWidget : AppWidgetProvider() {
             // Recheck after suspend work, so enabling privacy lock cannot publish an old cover.
             if (!locked && g.securityPreferences.useAuthenticator.get()) { refresh(context); return }
             if (story != null && g.libraryVisibility.isHidden(story.key)) { refresh(context); return }
-            ids.forEach { id ->
-                val view = RemoteViews(context.packageName, R.layout.continue_reading_widget)
+            (largeIds.map { it to false } + compactIds.map { it to true }).forEach { (id, compact) ->
+                val view = RemoteViews(context.packageName, if (compact) R.layout.continue_reading_widget_compact else R.layout.continue_reading_widget)
                 val dark = when (g.uiPreferences.themeMode.get()) {
                     ThemeMode.DARK -> true
                     ThemeMode.LIGHT -> false
@@ -111,8 +112,8 @@ class ContinueReadingWidget : AppWidgetProvider() {
                 val scheme = getThemeColorScheme(context, g.uiPreferences.appTheme.get(), dark, g.uiPreferences.themeDarkAmoled.get())
                 val ink = scheme.onPrimary.toArgb()
                 val options = manager.getAppWidgetOptions(id)
-                val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 300).coerceIn(250, 600)
-                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 220).coerceIn(200, 400)
+                val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, if (compact) 250 else 280).coerceIn(180, 600)
+                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, if (compact) 110 else 220).coerceIn(90, 400)
                 val background = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                 Canvas(background).apply {
                     drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 20f, 20f,
@@ -129,13 +130,21 @@ class ContinueReadingWidget : AppWidgetProvider() {
                     }, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = (ink and 0x00FFFFFF) or 0x29000000 })
                 }
                 view.setImageViewBitmap(R.id.continue_background, background)
-                listOf(R.id.continue_label, R.id.continue_title, R.id.continue_author, R.id.continue_kind,
-                    R.id.continue_status, R.id.continue_resume).forEach { view.setTextColor(it, ink) }
-                view.setTextViewText(R.id.continue_resume, if (story != null) "RESUME  →" else "OPEN ARKHIVE  →")
+                listOf(R.id.continue_label, R.id.continue_title, R.id.continue_author,
+                    R.id.continue_status).forEach { view.setTextColor(it, ink) }
+                val pill = Bitmap.createBitmap(88, 28, Bitmap.Config.ARGB_8888)
+                Canvas(pill).drawRoundRect(RectF(0f, 0f, 88f, 28f), 8f, 8f,
+                    Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink })
+                view.setImageViewBitmap(R.id.continue_kind_background, pill)
+                view.setTextColor(R.id.continue_kind, scheme.primary.toArgb())
+                val arrow = Bitmap.createBitmap(40, 40, Bitmap.Config.ARGB_8888)
+                Canvas(arrow).drawCircle(20f, 20f, 20f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ink })
+                view.setImageViewBitmap(R.id.continue_arrow_background, arrow)
+                view.setTextColor(R.id.continue_arrow, scheme.primary.toArgb())
                 val largeText = context.resources.configuration.fontScale > 1.3f
-                view.setInt(R.id.continue_title, "setMaxLines", if (largeText) 1 else 2)
-                view.setViewVisibility(R.id.continue_author, if (largeText) View.GONE else View.VISIBLE)
-                view.setViewVisibility(R.id.continue_kind, if (largeText) View.GONE else View.VISIBLE)
+                view.setInt(R.id.continue_title, "setMaxLines", if (compact) 2 else if (largeText) 2 else 3)
+                view.setViewVisibility(R.id.continue_author, if (compact || largeText) View.GONE else View.VISIBLE)
+                view.setViewVisibility(R.id.continue_kind_container, if (largeText) View.GONE else View.VISIBLE)
                 view.setTextViewText(R.id.continue_title, story?.title?.uppercase(Locale.getDefault()) ?: if (locked) "YOUR LIBRARY IS LOCKED" else "YOUR NEXT CHAPTER")
                 view.setTextViewText(R.id.continue_author, story?.author ?: if (locked) "Open Arkhive to unlock" else "Start a story in Arkhive")
                 view.setTextViewText(R.id.continue_kind, story?.kind ?: "ARKHIVE")
@@ -189,3 +198,6 @@ class ContinueReadingWidget : AppWidgetProvider() {
         }
     }
 }
+
+/** A separate launcher picker option sharing selection, refresh, and resume behavior. */
+class ContinueReadingCompactWidget : ContinueReadingWidget()
