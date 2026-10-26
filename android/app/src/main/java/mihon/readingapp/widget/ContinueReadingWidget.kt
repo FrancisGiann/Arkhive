@@ -147,7 +147,9 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                 view.setInt(R.id.continue_title, "setMaxLines", if (compact || largeText) 2 else 3)
                 view.setViewVisibility(R.id.continue_label, if (compact && largeText) View.GONE else View.VISIBLE)
                 view.setViewVisibility(R.id.continue_author, if (compact || largeText) View.GONE else View.VISIBLE)
-                view.setViewVisibility(R.id.continue_kind_container, if (compact || largeText) View.GONE else View.VISIBLE)
+                // A category badge fits beside the cover only when the compact card has room.
+                val showKind = !largeText && (!compact || (story != null && width >= 150 && height >= 150))
+                view.setViewVisibility(R.id.continue_kind_container, if (showKind) View.VISIBLE else View.GONE)
                 val title = story?.title ?: if (locked) "YOUR LIBRARY IS LOCKED" else "YOUR NEXT CHAPTER"
                 view.setTextViewText(R.id.continue_title, if (compact) title else title.uppercase(Locale.getDefault()))
                 view.setTextViewText(R.id.continue_author, story?.author ?: if (locked) "Open Arkhive to unlock" else "Start a story in Arkhive")
@@ -161,6 +163,9 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                 view.setImageViewBitmap(R.id.continue_progress, meter)
                 view.setImageViewResource(R.id.continue_cover, R.drawable.readingapp_icon)
                 if (bitmap != null) view.setImageViewBitmap(R.id.continue_cover, bitmap)
+                // The square fallback icon would consume most of a two-column widget.
+                // Empty and coverless compact cards keep the reading details full width.
+                if (compact) view.setViewVisibility(R.id.continue_cover, if (bitmap != null) View.VISIBLE else View.GONE)
                 view.setContentDescription(R.id.continue_cover, story?.let { "Cover of ${it.title}" } ?: "Arkhive")
                 view.setContentDescription(R.id.continue_root, story?.let { "Resume ${it.title}. ${it.status}" } ?: "Open Arkhive library")
                 val intent = Intent(context, MainActivity::class.java).setAction(ACTION)
