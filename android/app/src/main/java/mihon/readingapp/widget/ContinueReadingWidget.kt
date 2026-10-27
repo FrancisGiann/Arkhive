@@ -39,6 +39,8 @@ internal data class ContinueStory(val key: String, val title: String, val author
 
 internal data class ContinueReadingRequest(val key: String?)
 
+private data class WidgetSelection(val locked: Boolean, val story: ContinueStory?)
+
 /** Coil can return hardware pixels that a software widget Canvas cannot draw or parcel safely. */
 internal fun Bitmap.forWidgetCanvas(): Bitmap =
     if (config == Bitmap.Config.HARDWARE) copy(Bitmap.Config.ARGB_8888, false)
@@ -67,6 +69,7 @@ open class ContinueReadingWidget : AppWidgetProvider() {
     companion object {
         const val ACTION = "arkhive.CONTINUE_READING"
         const val KEY = "continue_story"
+        private val refreshCoordinator = ContinueReadingRefreshCoordinator<WidgetSelection, Bitmap>()
 
         /** A cover-led compact card with an opaque footer, drawn as one rounded bitmap. */
         internal fun compactBackground(context: Context, cover: Bitmap?, width: Int, height: Int, accent: Int): Bitmap {
@@ -198,16 +201,36 @@ open class ContinueReadingWidget : AppWidgetProvider() {
             val hybridIds = manager.getAppWidgetIds(ComponentName(context, ContinueReadingHybridWidget::class.java))
             if (largeIds.isEmpty() && compactIds.isEmpty() && hybridIds.isEmpty()) return
             val g = context.appGraph
-            val locked = g.securityPreferences.useAuthenticator.get()
-            val story = if (locked) null else runCatching { selectContinueStory(stories(context), g.libraryVisibility.hiddenSeries.get()) }.getOrNull()
-            val bitmap = story?.cover?.let { cover -> runCatching {
-                // Never fetch cover art from the network just to render a launcher widget.
-                context.imageLoader.execute(ImageRequest.Builder(context).data(cover).size(240, 340)
-                    .networkCachePolicy(CachePolicy.DISABLED).build()).image?.asDrawable(context.resources)?.toBitmap()?.forWidgetCanvas()
-            }.getOrNull() }
-            // Recheck after suspend work, so enabling privacy lock cannot publish an old cover.
-            if (!locked && g.securityPreferences.useAuthenticator.get()) { refresh(context); return }
-            if (story != null && g.libraryVisibility.isHidden(story.key)) { refresh(context); return }
+            refreshCoordinator.refresh(
+                select = {
+                    val locked = g.securityPreferences.useAuthenticator.get()
+                    val story = if (locked) null else try {
+                        selectContinueStory(stories(context), g.libraryVisibility.hiddenSeries.get())
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    }
+                    WidgetSelection(locked, story)
+                },
+                loadCover = { selection -> selection.story?.cover?.let { cover ->
+                    // Never fetch cover art from the network just to render a launcher widget.
+                    context.imageLoader.execute(ImageRequest.Builder(context).data(cover).size(240, 340)
+                        .networkCachePolicy(CachePolicy.DISABLED).build()).image?.asDrawable(context.resources)?.toBitmap()?.forWidgetCanvas()
+                } },
+                sameSelection = { before, after ->
+                    before.locked == after.locked &&
+                        before.story?.key == after.story?.key &&
+                        before.story?.title == after.story?.title &&
+                        before.story?.author == after.story?.author &&
+                        before.story?.kind == after.story?.kind &&
+                        before.story?.progress == after.story?.progress &&
+                        before.story?.status == after.story?.status &&
+                        before.story?.lastRead == after.story?.lastRead
+                },
+                publish = { selection, bitmap ->
+            val locked = selection.locked
+            val story = selection.story
             (largeIds.map { Triple(it, false, false) } + compactIds.map { Triple(it, true, false) } +
                 hybridIds.map { Triple(it, true, true) }).forEach { (id, compact, hybrid) ->
                 val layout = when {
@@ -237,7 +260,10 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                     view.setImageViewBitmap(R.id.continue_hybrid_cover,
                         hybridCover(context, bitmap, ((width - 18) * .43f).roundToInt().coerceAtLeast(1), (height - 48).coerceAtLeast(1), dark))
                     view.setTextViewText(R.id.continue_hybrid_title, title)
-                    view.setInt(R.id.continue_hybrid_title, "setMaxLines", if (tight) 1 else 2)
+                    // Reserve status/meter space at 110dp, then use the extra height on roomier launchers.
+                    // The title and status sit in separate weighted rows so long text cannot overlap them.
+                    val titleLines = ((height - 82) / 15).coerceIn(2, 5)
+                    view.setInt(R.id.continue_hybrid_title, "setMaxLines", titleLines)
                     view.setTextColor(R.id.continue_hybrid_title, text)
                     view.setTextViewText(R.id.continue_hybrid_status, hybridStatus(story, locked, tight))
                     view.setTextColor(R.id.continue_hybrid_status, text)
@@ -327,6 +353,8 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 manager.updateAppWidget(id, view)
             }
+                },
+            )
         }
 
         /** Called only through the normal MainActivity. Revalidate stale launcher intents. */

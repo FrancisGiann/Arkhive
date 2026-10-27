@@ -66,9 +66,9 @@ class ContinueReadingWidgetInflationTest {
         val progress = rendered.findViewById<View>(R.id.continue_hybrid_progress)
         val button = rendered.findViewById<View>(R.id.continue_hybrid_resume_button)
         val label = rendered.findViewById<TextView>(R.id.continue_hybrid_resume_text)
-        for ((width, height) in listOf(110 to 110, 160 to 160, 180 to 220)) {
+        for ((width, height) in listOf(110 to 110, 140 to 140, 160 to 160, 180 to 220)) {
             RemoteViews(context.packageName, layout).apply {
-                setInt(R.id.continue_hybrid_title, "setMaxLines", if (width == 110) 1 else 2)
+                setInt(R.id.continue_hybrid_title, "setMaxLines", ((height - 82) / 15).coerceIn(2, 5))
                 setTextViewText(R.id.continue_hybrid_resume_text, if (width == 110) "Resume" else "Resume reading")
             }.reapply(context, rendered)
             val density = context.resources.displayMetrics.density
@@ -85,6 +85,8 @@ class ContinueReadingWidgetInflationTest {
             assertTrue("portrait cover has useful width", cover.width > (if (width == 110) 30 else 50) * density)
             assertTrue("cover sits beside the title", bounds(cover).right < bounds(title).left)
             assertTrue("title does not collide with progress", bounds(title).bottom <= bounds(progress).top)
+            assertTrue("long title never overlaps reading status", bounds(title).bottom <= bounds(status).top)
+            if (height >= 160) assertTrue("roomier 2x2 cards allow the title to wrap", title.maxLines >= 4)
             assertTrue("status clears the progress meter", bounds(status).bottom <= bounds(progress).top)
             assertTrue("cover clears the button", bounds(cover).bottom <= bounds(button).top)
             assertTrue("button stays inside the card", bounds(button).bottom <= heightPx)

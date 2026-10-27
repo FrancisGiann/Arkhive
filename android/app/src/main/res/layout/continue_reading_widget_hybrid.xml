@@ -14,22 +14,24 @@
         <ImageView android:id="@+id/continue_hybrid_cover"
             android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.43"
             android:scaleType="fitXY" android:importantForAccessibility="no"/>
-        <FrameLayout android:layout_width="0dp" android:layout_height="match_parent"
-            android:layout_weight="0.57" android:layout_marginStart="6dp">
+        <LinearLayout android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="0.57" android:layout_marginStart="6dp"
+            android:orientation="vertical">
             <TextView android:id="@+id/continue_hybrid_title"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_weight="1" android:gravity="top"
                 android:fontFamily="@font/ink_display" android:textSize="11sp"
-                android:maxLines="2" android:ellipsize="end" android:text="Your next chapter"/>
+                android:maxLines="5" android:ellipsize="end" android:text="Your next chapter"/>
             <TextView android:id="@+id/continue_hybrid_status"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_gravity="bottom" android:layout_marginBottom="14dp"
+                android:layout_marginBottom="6dp"
                 android:textSize="8sp" android:maxLines="1" android:ellipsize="end"
                 android:text="Start reading"/>
             <ImageView android:id="@+id/continue_hybrid_progress"
                 android:layout_width="match_parent" android:layout_height="3dp"
-                android:layout_gravity="bottom" android:layout_marginBottom="6dp"
+                android:layout_marginBottom="6dp"
                 android:scaleType="fitXY" android:importantForAccessibility="no"/>
-        </FrameLayout>
+        </LinearLayout>
     </LinearLayout>
 
     <FrameLayout android:id="@+id/continue_hybrid_resume_button"
