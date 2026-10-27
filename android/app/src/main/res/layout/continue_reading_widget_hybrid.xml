@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/continue_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView android:id="@+id/continue_hybrid_background"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="fitXY" android:importantForAccessibility="no"/>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_marginBottom="36dp" android:padding="6dp"
+        android:orientation="horizontal" android:weightSum="1">
+        <ImageView android:id="@+id/continue_hybrid_cover"
+            android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.43"
+            android:scaleType="fitXY" android:importantForAccessibility="no"/>
+        <FrameLayout android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="0.57" android:layout_marginStart="6dp">
+            <TextView android:id="@+id/continue_hybrid_title"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:fontFamily="@font/ink_display" android:textSize="11sp"
+                android:maxLines="2" android:ellipsize="end" android:text="Your next chapter"/>
+            <TextView android:id="@+id/continue_hybrid_status"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_gravity="bottom" android:layout_marginBottom="14dp"
+                android:textSize="8sp" android:maxLines="1" android:ellipsize="end"
+                android:text="Start reading"/>
+            <ImageView android:id="@+id/continue_hybrid_progress"
+                android:layout_width="match_parent" android:layout_height="3dp"
+                android:layout_gravity="bottom" android:layout_marginBottom="6dp"
+                android:scaleType="fitXY" android:importantForAccessibility="no"/>
+        </FrameLayout>
+    </LinearLayout>
+
+    <FrameLayout android:id="@+id/continue_hybrid_resume_button"
+        android:layout_width="match_parent" android:layout_height="30dp"
+        android:layout_gravity="bottom" android:layout_marginStart="6dp"
+        android:layout_marginEnd="6dp" android:layout_marginBottom="6dp">
+        <TextView android:id="@+id/continue_hybrid_resume_text"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layout_marginStart="9dp" android:layout_marginEnd="27dp"
+            android:gravity="center_vertical" android:fontFamily="@font/ink_body"
+            android:textStyle="bold" android:textSize="11sp" android:maxLines="1"
+            android:ellipsize="end" android:text="Resume reading"
+            android:importantForAccessibility="no"/>
+        <TextView android:id="@+id/continue_hybrid_arrow"
+            android:layout_width="20dp" android:layout_height="match_parent"
+            android:layout_gravity="end" android:layout_marginEnd="7dp"
+            android:gravity="center" android:text="➜" android:textSize="18sp"
+            android:importantForAccessibility="no"/>
+    </FrameLayout>
+</FrameLayout>

@@ -253,6 +253,10 @@
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/continue_reading_widget_compact"/>
         </receiver>
+        <receiver android:name="mihon.readingapp.widget.ContinueReadingHybridWidget" android:exported="false" android:label="@string/continue_widget_hybrid_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/continue_reading_widget_hybrid_provider"/>
+        </receiver>
     </application>
 
 </manifest>

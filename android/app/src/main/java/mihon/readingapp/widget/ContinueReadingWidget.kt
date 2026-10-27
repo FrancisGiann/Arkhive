@@ -39,6 +39,11 @@ internal data class ContinueStory(val key: String, val title: String, val author
 
 internal data class ContinueReadingRequest(val key: String?)
 
+/** Coil can return hardware pixels that a software widget Canvas cannot draw or parcel safely. */
+internal fun Bitmap.forWidgetCanvas(): Bitmap =
+    if (config == Bitmap.Config.HARDWARE) copy(Bitmap.Config.ARGB_8888, false)
+        ?: error("Could not copy widget cover to a software bitmap") else this
+
 /** Consume a widget launch before navigation so warm and restored activities cannot replay it. */
 internal fun Intent.takeContinueReadingRequest(): ContinueReadingRequest? {
     if (action != ContinueReadingWidget.ACTION) return null
@@ -64,7 +69,7 @@ open class ContinueReadingWidget : AppWidgetProvider() {
         const val KEY = "continue_story"
 
         /** A cover-led compact card with an opaque footer, drawn as one rounded bitmap. */
-        private fun compactBackground(context: Context, cover: Bitmap?, width: Int, height: Int, accent: Int): Bitmap {
+        internal fun compactBackground(context: Context, cover: Bitmap?, width: Int, height: Int, accent: Int): Bitmap {
             val density = context.resources.displayMetrics.density.coerceIn(1f, 2.5f)
             val result = Bitmap.createBitmap((width * density).roundToInt(), (height * density).roundToInt(), Bitmap.Config.ARGB_8888)
             val canvas = Canvas(result)
@@ -73,14 +78,15 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                 addRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 18f, 18f, Path.Direction.CW)
             })
             if (cover != null && cover.width > 0 && cover.height > 0) {
+                val canvasCover = cover.forWidgetCanvas()
                 // Center-crop without stretching the book cover.
-                val sourceAspect = cover.width.toFloat() / cover.height
+                val sourceAspect = canvasCover.width.toFloat() / canvasCover.height
                 val targetAspect = width.toFloat() / height
-                val cropWidth = if (sourceAspect > targetAspect) (cover.height * targetAspect).roundToInt().coerceIn(1, cover.width) else cover.width
-                val cropHeight = if (sourceAspect > targetAspect) cover.height else (cover.width / targetAspect).roundToInt().coerceIn(1, cover.height)
-                val left = (cover.width - cropWidth) / 2
-                val top = (cover.height - cropHeight) / 2
-                canvas.drawBitmap(cover, Rect(left, top, left + cropWidth, top + cropHeight),
+                val cropWidth = if (sourceAspect > targetAspect) (canvasCover.height * targetAspect).roundToInt().coerceIn(1, canvasCover.width) else canvasCover.width
+                val cropHeight = if (sourceAspect > targetAspect) canvasCover.height else (canvasCover.width / targetAspect).roundToInt().coerceIn(1, canvasCover.height)
+                val left = (canvasCover.width - cropWidth) / 2
+                val top = (canvasCover.height - cropHeight) / 2
+                canvas.drawBitmap(canvasCover, Rect(left, top, left + cropWidth, top + cropHeight),
                     RectF(0f, 0f, width.toFloat(), height.toFloat()), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
             } else {
                 canvas.drawColor(androidx.core.graphics.ColorUtils.blendARGB(accent, Color.rgb(34, 29, 54), .62f))
@@ -94,6 +100,58 @@ open class ContinueReadingWidget : AppWidgetProvider() {
             canvas.drawRect(0f, height - 61f, width.toFloat(), height.toFloat(),
                 Paint().apply { color = Color.rgb(37, 30, 60) })
             return result
+        }
+
+        /** The hybrid keeps a real portrait cover and a separate, full-width resume affordance. */
+        private fun hybridBackground(context: Context, width: Int, height: Int, dark: Boolean): Bitmap {
+            val density = context.resources.displayMetrics.density.coerceIn(1f, 2.5f)
+            val result = Bitmap.createBitmap((width * density).roundToInt(), (height * density).roundToInt(), Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(result).apply { scale(density, density) }
+            canvas.drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 18f, 18f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (dark) Color.rgb(49, 40, 69) else Color.rgb(237, 228, 250) })
+            canvas.drawRoundRect(RectF(6f, height - 36f, width - 6f, height - 6f), 10f, 10f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (dark) Color.rgb(196, 162, 247) else Color.rgb(45, 34, 70) })
+            return result
+        }
+
+        internal fun hybridCover(context: Context, cover: Bitmap?, width: Int, height: Int, dark: Boolean): Bitmap {
+            val density = context.resources.displayMetrics.density.coerceIn(1f, 2.5f)
+            val result = Bitmap.createBitmap((width * density).roundToInt(), (height * density).roundToInt(), Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(result).apply { scale(density, density) }
+            canvas.clipPath(Path().apply {
+                addRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 7f, 7f, Path.Direction.CW)
+            })
+            if (cover != null && cover.width > 0 && cover.height > 0) {
+                val canvasCover = cover.forWidgetCanvas()
+                val targetAspect = width.toFloat() / height
+                val coverAspect = canvasCover.width.toFloat() / canvasCover.height
+                val cropWidth = if (coverAspect > targetAspect) (canvasCover.height * targetAspect).roundToInt().coerceIn(1, canvasCover.width) else canvasCover.width
+                val cropHeight = if (coverAspect > targetAspect) canvasCover.height else (canvasCover.width / targetAspect).roundToInt().coerceIn(1, canvasCover.height)
+                val left = (canvasCover.width - cropWidth) / 2
+                val top = (canvasCover.height - cropHeight) / 2
+                canvas.drawBitmap(canvasCover, Rect(left, top, left + cropWidth, top + cropHeight),
+                    RectF(0f, 0f, width.toFloat(), height.toFloat()), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            } else {
+                canvas.drawColor(if (dark) Color.rgb(73, 57, 103) else Color.rgb(197, 176, 225))
+                runCatching { context.getDrawable(R.drawable.readingapp_icon)?.toBitmap(42, 42) }.getOrNull()?.let { icon ->
+                    val side = minOf(width, height) * .58f
+                    canvas.drawBitmap(icon, null,
+                        RectF((width - side) / 2f, (height - side) / 2f, (width + side) / 2f, (height + side) / 2f),
+                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                }
+            }
+            return result
+        }
+
+        private fun hybridStatus(story: ContinueStory?, locked: Boolean, tight: Boolean): String {
+            if (story == null) return if (locked) "Unlock to resume" else "Start reading"
+            if (tight) return "${(story.progress.coerceIn(0.0, 1.0) * 100).roundToInt()}% read"
+            return when (story.key.substringBefore(':')) {
+                "manga" -> story.status.substringBefore(" chapters read") + " read"
+                "novel" -> story.status.substringBefore(" · ")
+                "book" -> "${(story.progress.coerceIn(0.0, 1.0) * 100).roundToInt()}% read"
+                else -> story.status
+            }
         }
 
         fun observe(context: Context, scope: CoroutineScope) {
@@ -137,20 +195,27 @@ open class ContinueReadingWidget : AppWidgetProvider() {
             val manager = AppWidgetManager.getInstance(context)
             val largeIds = manager.getAppWidgetIds(ComponentName(context, ContinueReadingWidget::class.java))
             val compactIds = manager.getAppWidgetIds(ComponentName(context, ContinueReadingCompactWidget::class.java))
-            if (largeIds.isEmpty() && compactIds.isEmpty()) return
+            val hybridIds = manager.getAppWidgetIds(ComponentName(context, ContinueReadingHybridWidget::class.java))
+            if (largeIds.isEmpty() && compactIds.isEmpty() && hybridIds.isEmpty()) return
             val g = context.appGraph
             val locked = g.securityPreferences.useAuthenticator.get()
             val story = if (locked) null else runCatching { selectContinueStory(stories(context), g.libraryVisibility.hiddenSeries.get()) }.getOrNull()
             val bitmap = story?.cover?.let { cover -> runCatching {
                 // Never fetch cover art from the network just to render a launcher widget.
                 context.imageLoader.execute(ImageRequest.Builder(context).data(cover).size(240, 340)
-                    .networkCachePolicy(CachePolicy.DISABLED).build()).image?.asDrawable(context.resources)?.toBitmap()
+                    .networkCachePolicy(CachePolicy.DISABLED).build()).image?.asDrawable(context.resources)?.toBitmap()?.forWidgetCanvas()
             }.getOrNull() }
             // Recheck after suspend work, so enabling privacy lock cannot publish an old cover.
             if (!locked && g.securityPreferences.useAuthenticator.get()) { refresh(context); return }
             if (story != null && g.libraryVisibility.isHidden(story.key)) { refresh(context); return }
-            (largeIds.map { it to false } + compactIds.map { it to true }).forEach { (id, compact) ->
-                val view = RemoteViews(context.packageName, if (compact) R.layout.continue_reading_widget_compact else R.layout.continue_reading_widget)
+            (largeIds.map { Triple(it, false, false) } + compactIds.map { Triple(it, true, false) } +
+                hybridIds.map { Triple(it, true, true) }).forEach { (id, compact, hybrid) ->
+                val layout = when {
+                    hybrid -> R.layout.continue_reading_widget_hybrid
+                    compact -> R.layout.continue_reading_widget_compact
+                    else -> R.layout.continue_reading_widget
+                }
+                val view = RemoteViews(context.packageName, layout)
                 val dark = when (g.uiPreferences.themeMode.get()) {
                     ThemeMode.DARK -> true
                     ThemeMode.LIGHT -> false
@@ -163,6 +228,43 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                     .coerceIn(if (compact) 110 else 250, 600)
                 val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, if (compact) 110 else 220)
                     .coerceIn(if (compact) 110 else 200, 400)
+                if (hybrid) {
+                    val tight = width < 145 || height < 140 || context.resources.configuration.fontScale > 1.3f
+                    val text = if (dark) Color.WHITE else Color.rgb(43, 32, 66)
+                    val buttonText = if (dark) Color.rgb(34, 25, 49) else Color.WHITE
+                    val title = story?.title ?: if (locked) "Your library is locked" else "Your next chapter"
+                    view.setImageViewBitmap(R.id.continue_hybrid_background, hybridBackground(context, width, height, dark))
+                    view.setImageViewBitmap(R.id.continue_hybrid_cover,
+                        hybridCover(context, bitmap, ((width - 18) * .43f).roundToInt().coerceAtLeast(1), (height - 48).coerceAtLeast(1), dark))
+                    view.setTextViewText(R.id.continue_hybrid_title, title)
+                    view.setInt(R.id.continue_hybrid_title, "setMaxLines", if (tight) 1 else 2)
+                    view.setTextColor(R.id.continue_hybrid_title, text)
+                    view.setTextViewText(R.id.continue_hybrid_status, hybridStatus(story, locked, tight))
+                    view.setTextColor(R.id.continue_hybrid_status, text)
+                    val meter = Bitmap.createBitmap(320, 3, Bitmap.Config.ARGB_8888)
+                    meter.eraseColor(if (dark) Color.rgb(103, 83, 126) else Color.rgb(191, 173, 219))
+                    Canvas(meter).drawRect(0f, 0f, (320 * (story?.progress ?: 0.0).coerceIn(0.0, 1.0)).toFloat(), 3f,
+                        Paint().apply { color = if (dark) Color.rgb(221, 187, 255) else Color.rgb(111, 67, 185) })
+                    view.setImageViewBitmap(R.id.continue_hybrid_progress, meter)
+                    val action = if (story == null) {
+                        if (locked) "Unlock Arkhive" else "Open library"
+                    } else "Resume reading"
+                    view.setTextViewText(R.id.continue_hybrid_resume_text, if (tight) action.substringBefore(' ') else action)
+                    view.setTextColor(R.id.continue_hybrid_resume_text, buttonText)
+                    view.setTextColor(R.id.continue_hybrid_arrow, buttonText)
+                    val description = story?.let { "Resume reading ${it.title}. ${it.status}" } ?: action
+                    view.setContentDescription(R.id.continue_root, description)
+                    view.setContentDescription(R.id.continue_hybrid_resume_button, description)
+                    val intent = Intent(context, MainActivity::class.java).setAction(ACTION)
+                        .setData(android.net.Uri.parse("arkhive://continue/$id"))
+                        .putExtra(KEY, story?.key).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    val click = PendingIntent.getActivity(context, id, intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                    view.setOnClickPendingIntent(R.id.continue_root, click)
+                    view.setOnClickPendingIntent(R.id.continue_hybrid_resume_button, click)
+                    manager.updateAppWidget(id, view)
+                    return@forEach
+                }
                 val background = if (compact) compactBackground(context, bitmap, width, height, scheme.primary.toArgb())
                     else Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { largeBackground -> Canvas(largeBackground).apply {
                     drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 20f, 20f,
@@ -268,3 +370,6 @@ open class ContinueReadingWidget : AppWidgetProvider() {
 
 /** A separate launcher picker option sharing selection, refresh, and resume behavior. */
 class ContinueReadingCompactWidget : ContinueReadingWidget()
+
+/** A second 2×2 picker option with a larger portrait cover and explicit resume button. */
+class ContinueReadingHybridWidget : ContinueReadingWidget()
