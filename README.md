@@ -2,9 +2,9 @@
 
 A cover-led Android reader for manga, manhwa, manhua, online novels, and local EPUB/PDF/text. Arkhive retains Mihon's native image reader and source host, with Readium for reflowable books.
 
-**Current preview: 0.4.12.** This is a universal debug APK, not a production release. The Continue Reading widget fix still awaits phone launcher testing.
+**Current preview: 0.4.16.** This is a universal debug APK, not a production release.
 
-[Download Arkhive-0.4.12.apk](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.12/Arkhive-0.4.12.apk) · [Release notes](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.12) · [SHA-256 file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.12/Arkhive-0.4.12.apk.sha256)
+[Download Arkhive-0.4.16.apk](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.16/Arkhive-0.4.16.apk) · [Release notes](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.16) · [SHA-256 file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.16/Arkhive-0.4.16.apk.sha256)
 
 ## Install or update
 
@@ -12,13 +12,7 @@ A cover-led Android reader for manga, manhwa, manhua, online novels, and local E
 2. Open the APK on Android. If prompted, allow installation from the browser or file manager used for this download.
 3. To update the existing Arkhive preview, install over it. The package and signing certificate are unchanged; keep the existing installation to retain its data.
 
-Internal version: **0.4.12-1**, version code **19**. Package: `dev.francisgiann.readingapp.dev`. The universal APK includes ARM64, ARMv7, x86 and x86_64 libraries. Size: **101,649,222 bytes**.
-
-SHA-256:
-
-~~~text
-d8762e2abf96998b6000752dcd409d2782ca4227781d7991b203d2216f0364b0
-~~~
+Internal version: **0.4.16-25**, version code **23**. Package: `dev.francisgiann.readingapp.dev`. The universal APK includes ARM64, ARMv7, x86 and x86_64 libraries. Compare its SHA-256 with the linked checksum asset.
 
 The [0.4.10 preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.10) was withdrawn after a launcher widget loading report. Check each release's notes before changing versions.
 
@@ -32,6 +26,7 @@ The [0.4.10 preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.1
 
 ## Changes
 
+- 0.4.16 lets the current tiled image viewport progress when an older queued decode is canceled. See the [release notes](RELEASE-NOTES-0.4.16.md) for tests and device-verification limits.
 - 0.4.12 makes the 2×2 Continue Reading cover grow with the card and keeps progress clear of the arrow. The large widget remains available. See the [release notes](RELEASE-NOTES-0.4.12.md) for verification limits.
 - 0.4.11 repairs the Continue Reading launcher layouts and adds a true 2×2 compact option alongside the large card. See the [release notes](RELEASE-NOTES-0.4.11.md) for the phone-testing gap.
 - Isolated JavaScript startup now recovers after a cancelled support check, with fresh sandbox execution and explicit trust/origin limits retained. Includes the reviewed0.4.7 zoom/scroll fixes and compact Explore action; the exact partial zoom-out/scroll sequence is now covered.
@@ -59,11 +54,11 @@ Discovery uses real Open Library catalog matches and supported source trend wind
 
 ## Preview validation and limits
 
-See [0.4.12 release notes](RELEASE-NOTES-0.4.12.md) for current widget verification and limits. Existing saved reading progress and per-title paper preferences are retained.
+See [0.4.16 release notes](RELEASE-NOTES-0.4.16.md) for the current reader fix and its verification limits. Existing saved reading progress and per-title paper preferences are retained.
 
 ## Repository and credits
 
-The implementation source is published under [android/](android/), including the Gradle project, authored fixtures/tests and required license notices. The v0.4.12 tag points to this implementation snapshot. See [build instructions](android/README.md). Signing material, local build caches, credentials, user data and private QA archives are excluded.
+The implementation source is published under [android/](android/), including the Gradle project, authored fixtures/tests and required license notices. The v0.4.16 tag points to this implementation snapshot. See [build instructions](android/README.md). Signing material, local build caches, credentials, user data and private QA archives are excluded.
 
 Earlier release tags through 0.4.4 predate source publication: their automatic **Source code** archives contain the then-public documentation repository, not a matching implementation source release. The APKs and checksums attached to those releases remain unchanged.
 

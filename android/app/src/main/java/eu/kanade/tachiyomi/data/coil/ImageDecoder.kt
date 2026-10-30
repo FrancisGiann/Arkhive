@@ -3,9 +3,15 @@ package eu.kanade.tachiyomi.data.coil
 import android.graphics.Bitmap
 import android.graphics.Rect
 import mihon.readingapp.readers.LongPagePolicy
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.roundToInt
 import coil3.Canvas
 import coil3.Image
@@ -18,8 +24,6 @@ import coil3.decode.ImageSource
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import coil3.request.bitmapConfig
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.decoder.ImageDecoder
@@ -39,17 +43,37 @@ class ImageDecoder(private val resources: ImageSource, private val options: Opti
         override val size: Long get() = 0 // Never enter Coil's shared bitmap cache.
         override val shareable: Boolean get() = false
         override fun draw(canvas: Canvas) {}
-        suspend fun region(top: Int, bottom: Int, sample: Int, targetWidth: Int): Bitmap? =
-            withContext(NonCancellable + Dispatchers.Default) { stripDecodes.withPermit { synchronized(lock) {
-                if (closed) return@synchronized null
-                val bitmap = decoder.decode(Rect(0, top, width, bottom), sample) ?: error("The image region could not be decoded.")
-                if (bitmap.width <= targetWidth) bitmap
-                else {
-                    try { Bitmap.createScaledBitmap(bitmap, targetWidth,
-                        (bitmap.height.toDouble() * targetWidth / bitmap.width).roundToInt().coerceAtLeast(1), true) }
-                    finally { bitmap.recycle() }
+        suspend fun region(top: Int, bottom: Int, sample: Int, targetWidth: Int): Bitmap? {
+            val callerJob = currentCoroutineContext()[Job]
+            val ownedBitmap = AtomicReference<Bitmap?>(null)
+            try {
+                val result = stripDecodes.withPermit {
+                    synchronized(lock) {
+                        if (closed) return@synchronized null
+                        callerJob?.ensureActive()
+                        val bitmap = decoder.decode(Rect(0, top, width, bottom), sample)
+                            ?: error("The image region could not be decoded.")
+                        ownedBitmap.set(bitmap)
+                        // Native decode itself cannot be interrupted. Recycle its result as soon
+                        // as it returns if the viewport request went stale while JNI was running.
+                        callerJob?.ensureActive()
+                        if (bitmap.width <= targetWidth) bitmap else {
+                            val scaled = Bitmap.createScaledBitmap(bitmap, targetWidth,
+                                (bitmap.height.toDouble() * targetWidth / bitmap.width).roundToInt().coerceAtLeast(1), true)
+                            bitmap.recycle()
+                            ownedBitmap.set(scaled)
+                            scaled
+                        }
+                    }
                 }
-            } } }
+                callerJob?.ensureActive()
+                ownedBitmap.set(null)
+                return result
+            } catch (error: Throwable) {
+                ownedBitmap.getAndSet(null)?.takeUnless(Bitmap::isRecycled)?.recycle()
+                throw error
+            }
+        }
         fun close() = synchronized(lock) { if (!closed) { closed = true; decoder.recycle() } }
     }
 
@@ -140,4 +164,20 @@ class ImageDecoder(private val resources: ImageSource, private val options: Opti
 }
 
 // One native region at a time; no parallel full-page allocations or uploads.
-private val stripDecodes = Semaphore(1)
+private val stripDecodes = RegionDecodeGate()
+
+/** Keeps waits cancellable while one native region decode finishes on a worker thread. */
+internal class RegionDecodeGate(
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+) {
+    private val semaphore = Semaphore(1)
+
+    suspend fun <T> withPermit(block: suspend () -> T): T {
+        semaphore.acquire()
+        try {
+            return withContext(NonCancellable + dispatcher) { block() }
+        } finally {
+            semaphore.release()
+        }
+    }
+}
