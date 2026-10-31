@@ -10,4 +10,8 @@ The isolated LNReader source runtime now provides a pure-data `URLSearchParams` 
 - All app JVM unit tests pass (133 tests). The universal local APK is signed with the existing Arkhive debug certificate; its version and checksum are recorded with the deliverable.
 - No exact user-installed community source was executed on an Android device. The compatibility fix addresses the observed missing `URLSearchParams` capability and does not claim that every source works; sources requiring the separate browser `URL` API remain unsupported.
 
-This is a local preview build, not a published GitHub release or production Play Store build.
+Package: `dev.francisgiann.readingapp.dev`; version `0.4.18-27`, version code 25. APK size: 101,682,120 bytes. SHA-256: `e1be7705888c26f2aa65cee437ef821126233f92d44e0a233558cb074466a2ea`.
+
+The verified APK was built from fix commit `8618a38611e78a33dcf374b56fc31f2c9b12e1a3`; subsequent publication documentation changes do not alter the app source or binary. The existing Bookplate widget and signing certificate are preserved. Arkhive's manual update checker remains available; include preview releases to see this update.
+
+This is a universal preview debug build, not a production Play Store build.
