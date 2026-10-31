@@ -41,6 +41,10 @@ class LnReaderUnapprovedCoverOriginException(val origin: String) : IllegalArgume
     "This cover needs the exact origin $origin. Open Novel extensions, review the current bundle, and select this public HTTPS origin before trusting the update.",
 )
 
+class LnReaderUnapprovedSourceOriginException(val origin: String) : IllegalArgumentException(
+    "This source requested the unreviewed HTTPS origin $origin. Select this exact origin during extension review; DNS and public-address checks still run before any connection.",
+)
+
 /**
  * Private, explicit-review repository and plugin state. Listing metadata never evaluates code;
  * only an in-memory review token plus the exact displayed SHA-256 can install a staged bundle.

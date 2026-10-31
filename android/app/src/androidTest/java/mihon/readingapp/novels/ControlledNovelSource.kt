@@ -10,6 +10,7 @@ internal class ControlledNovelSource(
     override val name: String = "Controlled fixture $id"
     override val site: String = "https://fixture.invalid"
     @Volatile var currentChapters: List<NovelChapter> = chapters
+    @Volatile var chapterFailure: Exception? = null
 
     override suspend fun catalog(page: Int, search: String, genre: String?) =
         NovelCatalogPage(emptyList(), null, "self-authored fixture")
@@ -25,5 +26,8 @@ internal class ControlledNovelSource(
         )
     }
 
-    override suspend fun chapter(path: String) = "<p>Self-authored test chapter.</p>"
+    override suspend fun chapter(path: String): String {
+        chapterFailure?.let { throw it }
+        return "<p>Self-authored test chapter.</p>"
+    }
 }

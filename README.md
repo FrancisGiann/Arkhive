@@ -4,6 +4,8 @@ A cover-led Android reader for manga, manhwa, manhua, online novels, and local E
 
 **Current preview: 0.4.18.** This is a universal debug APK, not a production release.
 
+The 0.4.19 validation build is an unpublished local candidate; the public download links below remain on 0.4.18.
+
 [Download Arkhive-0.4.18.apk](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.18/Arkhive-0.4.18.apk) · [Release notes](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.18) · [SHA-256 file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.18/Arkhive-0.4.18.apk.sha256)
 
 ## Install or update
@@ -26,6 +28,7 @@ The [0.4.10 preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.1
 
 ## Changes
 
+- 0.4.19 is an unpublished local candidate that adds the full `URL` and `URLSearchParams` APIs to the isolated novel source runtime, keeps source-origin approval explicit, preserves valid large catalog pages, and provides reader/download recovery when a source requests a new origin. Its host fixtures pass, but Android runtime and live source behavior remain unverified. See [candidate notes](RELEASE-NOTES-0.4.19.md).
 - 0.4.18 adds the missing `URLSearchParams` API to the isolated LNReader runtime. Tests include novelsOnline's real parser with simulated responses; live Android/source operation remains unverified and extensions requiring the separate `URL` API remain unsupported. See the [release notes](RELEASE-NOTES-0.4.18.md).
 - 0.4.17 adds the approved larger-cover Bookplate layout to the compact 2×2 widget, retaining other variants and resume behavior. See the [release notes](RELEASE-NOTES-0.4.17.md) for tests and phone-verification limits.
 - 0.4.16 lets the current tiled image viewport progress when an older queued decode is canceled. See the [release notes](RELEASE-NOTES-0.4.16.md) for tests and device-verification limits.

@@ -36,7 +36,9 @@ import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /** Strict public HTTPS client shared by repository metadata, bundles and extension fetch requests. */
-class LnReaderHttpBroker : LnReaderHostFetch {
+class LnReaderHttpBroker internal constructor(
+    private val hostResolver: (String) -> List<InetAddress> = { host -> InetAddress.getAllByName(host).toList() },
+) : LnReaderHostFetch {
     override suspend fun fetch(request: LnReaderHttpRequest, allowedOrigins: Set<String>, maxBytes: Int): LnReaderHttpResponse =
         withContext(Dispatchers.IO) {
             val jobContext = coroutineContext
@@ -50,9 +52,9 @@ class LnReaderHttpBroker : LnReaderHostFetch {
             while (true) {
                 coroutineContext.ensureActive()
                 val origin = url.originKey()
-                require(origin in allowedOrigins) { "The request origin is outside the approved source origins." }
                 require(url.host !in DENIED_HOSTNAMES &&
                     DENIED_HOST_SUFFIXES.none { suffix -> url.host.endsWith(suffix) }) { "Local and private network hosts are unsupported." }
+                if (origin !in allowedOrigins) throw LnReaderUnapprovedSourceOriginException(origin)
                 val headers = safeHeaders(outgoingHeaders)
                 require(method in setOf("GET", "HEAD", "POST")) { "This request method is unsupported." }
                 require(body == null || body.size <= MAX_REQUEST_BODY_BYTES) { "The request body exceeds its limit." }
@@ -100,7 +102,13 @@ class LnReaderHttpBroker : LnReaderHostFetch {
                         require(followed++ < MAX_REDIRECTS) { "The source redirected too many times." }
                         val location = response.header("Location") ?: error("The source redirect omitted its destination.")
                         val destination = parsePublicHttps(url.resolve(location)?.toString() ?: error("The source redirect is invalid."))
-                        require(destination.originKey() in allowedOrigins) { "The redirect leaves the approved source origins." }
+                        require(destination.host !in DENIED_HOSTNAMES &&
+                            DENIED_HOST_SUFFIXES.none { suffix -> destination.host.endsWith(suffix) }) {
+                            "Local and private network hosts are unsupported."
+                        }
+                        if (destination.originKey() !in allowedOrigins) {
+                            throw LnReaderUnapprovedSourceOriginException(destination.originKey())
+                        }
                         redirectedTo = destination
                         if ((response.code == 303 && method != "HEAD") ||
                             ((response.code == 301 || response.code == 302) && method == "POST")) {
@@ -164,7 +172,7 @@ class LnReaderHttpBroker : LnReaderHostFetch {
 
     private suspend fun resolvePublicBounded(host: String): List<InetAddress> {
         val lookup = try {
-            dnsExecutor.submit<List<InetAddress>> { InetAddress.getAllByName(host).toList() }
+            dnsExecutor.submit<List<InetAddress>> { hostResolver(host) }
         } catch (failure: RejectedExecutionException) {
             error("Source DNS lookup capacity is temporarily full.")
         }

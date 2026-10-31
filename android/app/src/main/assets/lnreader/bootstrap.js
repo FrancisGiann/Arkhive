@@ -33,16 +33,18 @@
     return chunks.join('');
   };
 
-  const urlSearchParamsSource = utf8(await bridge.consumeNamedDataAsArrayBuffer('lr-url-search-params'));
-  (new Function(`'use strict';\n${urlSearchParamsSource}`))();
-  if (typeof globalThis.URLSearchParams !== 'function') {
-    throw new Error('LNReader URLSearchParams compatibility failed to initialize.');
-  }
-
   const helpersSource = utf8(await bridge.consumeNamedDataAsArrayBuffer('lr-helper-bundle'));
   (new Function(`'use strict';\n${helpersSource}`))();
   const helpers = globalThis.__arkhiveLnReaderHelpers;
-  if (!helpers || !helpers.Buffer || !helpers.iconv) throw new Error('LNReader helper bundle failed to initialize.');
+  if (!helpers || !helpers.Buffer || !helpers.iconv || typeof helpers.URL !== 'function' ||
+      typeof helpers.URLSearchParams !== 'function' ||
+      !(new helpers.URL('https://fixture.invalid/').searchParams instanceof helpers.URLSearchParams)) {
+    throw new Error('LNReader helper bundle failed to initialize its URL compatibility API.');
+  }
+  // The standalone URL parser has no network access. Share its exact search-params constructor
+  // with URL.searchParams so mutations and identity follow the WHATWG URL API contract.
+  globalThis.URL = helpers.URL;
+  globalThis.URLSearchParams = helpers.URLSearchParams;
   const Buffer = helpers.Buffer;
   const pluginSource = Buffer.from(await bridge.consumeNamedDataAsArrayBuffer('lr-plugin-bundle')).toString('utf8');
   const input = JSON.parse(Buffer.from(await bridge.consumeNamedDataAsArrayBuffer('lr-operation-input')).toString('utf8'));

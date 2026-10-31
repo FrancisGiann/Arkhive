@@ -51,6 +51,7 @@
         android:theme="@style/Theme.Tachiyomi">
 
         <activity android:name="mihon.readingapp.novels.NovelReaderActivity" android:exported="false" />
+        <activity android:name="mihon.readingapp.novels.NovelExtensionOriginReviewActivity" android:exported="false" />
 
         <activity
             android:name="mihon.readingapp.books.BookReaderActivity"

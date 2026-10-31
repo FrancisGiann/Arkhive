@@ -22,6 +22,7 @@ import mihon.readingapp.library.ChapterMappingPlan
 import mihon.readingapp.library.ChapterMappingPolicy
 import mihon.readingapp.library.ChapterReference
 import eu.kanade.tachiyomi.data.download.SmartDownloadGate
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -392,7 +393,7 @@ class NovelRepository internal constructor(private val context: Context, val sou
         if (token != null && token == activeToken) { activeJob?.cancel(); schedule(true) }
     }
     suspend fun retry(key: String) { ready.await(); withContext(Dispatchers.IO) { lock.withLock {
-        db.execSQL("UPDATE novel_queue SET state='queued',attempts=0,error=NULL,token=? WHERE id=?", arrayOf(UUID.randomUUID().toString(), key)); publishLocked()
+        db.execSQL("UPDATE novel_queue SET state='queued',attempts=0,error=NULL,origin_review=NULL,token=? WHERE id=?", arrayOf(UUID.randomUUID().toString(), key)); publishLocked()
     } }; schedule(true) }
     suspend fun removeSaved(chapter: String) { ready.await(); cancel(chapter); withContext(Dispatchers.IO) { contentLock.withLock { lock.withLock {
         ownedFile(savedDirectory, chapter).delete(); ownedFile(cacheDirectory, chapter).delete(); db.execSQL("UPDATE novel_chapters SET saved=0 WHERE id=?", arrayOf(chapter)); publishLocked()
@@ -437,8 +438,10 @@ class NovelRepository internal constructor(private val context: Context, val sou
             } }
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (error: Exception) { withContext(NonCancellable + Dispatchers.IO) { lock.withLock {
-              db.execSQL("UPDATE novel_queue SET state=?,error=? WHERE id=? AND token=? AND state='downloading'",
-                  arrayOf(if (job.attempts < 3) "retry" else "failed", (error.message ?: "Chapter download failed.").take(500), job.id, job.token)); publishLocked()
+              val originReview = (error as? LnReaderUnapprovedSourceOriginException)?.origin
+              val failureState = if (originReview != null) "failed" else if (job.attempts < 3) "retry" else "failed"
+              db.execSQL("UPDATE novel_queue SET state=?,error=?,origin_review=? WHERE id=? AND token=? AND state='downloading'",
+                  arrayOf(failureState, (error.message ?: "Chapter download failed.").take(500), originReview, job.id, job.token)); publishLocked()
           } } }
         finally {
             if (activeToken == job.token) { activeToken = null; activeJob = null }
@@ -537,9 +540,10 @@ class NovelRepository internal constructor(private val context: Context, val sou
             c.int("bookmark") != 0, saved, saved || ownedFile(cacheDirectory, id).isFile,
             c.getColumnIndexOrThrow("number").let {if(c.isNull(it)) null else c.getDouble(it)},c.optional("release_time"),c.long("arrived_at"))
     }
-    private fun downloadsLocked(): List<NovelDownload> = db.rawQuery("SELECT q.*,c.novel_id,c.path,c.name,n.name AS novel_title FROM novel_queue q JOIN novel_chapters c ON c.id=q.id JOIN novels n ON n.id=c.novel_id ORDER BY q.added,c.position", null).use { c -> buildList {
+    private fun downloadsLocked(): List<NovelDownload> = db.rawQuery("SELECT q.*,c.novel_id,c.path,c.name,n.name AS novel_title,n.source AS source_id FROM novel_queue q JOIN novel_chapters c ON c.id=q.id JOIN novels n ON n.id=c.novel_id ORDER BY q.added,c.position", null).use { c -> buildList {
         while(c.moveToNext()) add(NovelDownload(c.text("id"), c.text("novel_id"), c.text("novel_title"),
-            c.text("path"), c.text("name"), c.text("state"), c.int("attempts"), c.optional("error"), c.text("token")))
+            c.text("path"), c.text("name"), c.text("state"), c.int("attempts"), c.optional("error"), c.text("token"),
+            c.text("source_id"), c.optional("origin_review")))
     } }
     private fun pausedLocked() = db.rawQuery("SELECT value FROM novel_options WHERE key='paused'", null).use { it.moveToFirst() && it.getString(0) == "1" }
     private fun ownedFile(dir: File, id: String): File { require(Regex("[a-f0-9]{64}").matches(id)); return File(dir, "$id.html") }
@@ -563,17 +567,18 @@ private fun Cursor.optional(key: String): String? { val i = getColumnIndexOrThro
 private fun Cursor.int(key: String) = getInt(getColumnIndexOrThrow(key))
 private fun Cursor.long(key: String) = getLong(getColumnIndexOrThrow(key))
 
-private class NovelDatabase(context: Context, name: String) : SQLiteOpenHelper(context, name, null, 2) {
+private class NovelDatabase(context: Context, name: String) : SQLiteOpenHelper(context, name, null, 3) {
     init { require(Regex("[a-zA-Z0-9_-]+\\.db").matches(name)) }
     override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE novels(id TEXT PRIMARY KEY,source TEXT NOT NULL,path TEXT NOT NULL,name TEXT NOT NULL,details TEXT NOT NULL,favorite INTEGER NOT NULL DEFAULT 0,last_chapter TEXT,last_read INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE novel_chapters(id TEXT PRIMARY KEY,novel_id TEXT NOT NULL REFERENCES novels(id) ON DELETE CASCADE,path TEXT NOT NULL,name TEXT NOT NULL,position INTEGER NOT NULL,active INTEGER NOT NULL DEFAULT 1,progress REAL NOT NULL DEFAULT 0,bookmark INTEGER NOT NULL DEFAULT 0,saved INTEGER NOT NULL DEFAULT 0,number REAL,release_time TEXT,arrived_at INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE INDEX novel_chapter_list ON novel_chapters(novel_id,active,position)")
-        db.execSQL("CREATE TABLE novel_queue(id TEXT PRIMARY KEY REFERENCES novel_chapters(id) ON DELETE CASCADE,state TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,error TEXT,token TEXT NOT NULL,added INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE novel_queue(id TEXT PRIMARY KEY REFERENCES novel_chapters(id) ON DELETE CASCADE,state TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,error TEXT,token TEXT NOT NULL,added INTEGER NOT NULL,origin_review TEXT)")
         db.execSQL("CREATE TABLE novel_options(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if(oldVersion<2) {db.execSQL("ALTER TABLE novel_chapters ADD COLUMN number REAL");db.execSQL("ALTER TABLE novel_chapters ADD COLUMN release_time TEXT");db.execSQL("ALTER TABLE novel_chapters ADD COLUMN arrived_at INTEGER NOT NULL DEFAULT 0")}
+        if(oldVersion<3) db.execSQL("ALTER TABLE novel_queue ADD COLUMN origin_review TEXT")
     }
 }

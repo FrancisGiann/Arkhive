@@ -1,5 +1,8 @@
 package mihon.readingapp.novels
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -12,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -33,11 +37,13 @@ private const val OFFICIAL_PLUGIN_REPOSITORY =
 class NovelExtensionsScreen(
     private val suggestedCoverOrigin: String? = null,
     private val suggestedSourceId: String? = null,
+    private val closeOnExit: Boolean = false,
 ) : Screen() {
     @Composable override fun Content() = LnReaderExtensionManagement(
         showHeader = true,
         suggestedCoverOrigin = suggestedCoverOrigin,
         suggestedSourceId = suggestedSourceId,
+        closeOnExit = closeOnExit,
     )
 }
 
@@ -45,8 +51,10 @@ class NovelExtensionsScreen(
     showHeader: Boolean = false,
     suggestedCoverOrigin: String? = null,
     suggestedSourceId: String? = null,
+    closeOnExit: Boolean = false,
 ) = InkSettingsTheme {
     val nav = LocalNavigator.currentOrThrow
+    val context = LocalContext.current
     val registry = currentNovelSources()
     val manager = remember(registry) { registry.lnReaderExtensions }
     val snapshot by manager.snapshots.collectAsStateWithLifecycle()
@@ -95,7 +103,9 @@ class NovelExtensionsScreen(
         .take(1000)
 
     Column(Modifier.fillMaxSize().background(Ink.Canvas)) {
-        if (showHeader) ArkhiveSettingsHeader("Novel extensions", { nav.pop(); Unit })
+        if (showHeader) ArkhiveSettingsHeader("Novel extensions", {
+            if (closeOnExit) context.findActivity()?.finish() else nav.pop()
+        })
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Text("Novel repositories use the LNReader JSON plugin manifest format; Mihon manga extension repositories are incompatible. Listings show metadata only. A selected bundle runs only after you review and trust it.", color = Ink.Muted, fontSize = 12.sp)
@@ -239,6 +249,12 @@ class NovelExtensionsScreen(
     ) }
 }
 
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 @Composable private fun ExtensionMetadataCard(
     repository: String,
     metadata: LnReaderPluginMetadata,
@@ -299,7 +315,7 @@ class NovelExtensionsScreen(
             Text("Required public HTTPS origins", style = MaterialTheme.typography.titleSmall)
             review.requiredOrigins.sorted().forEach { Text("• $it", fontSize = 12.sp) }
             if (suggestedOrigins.isNotEmpty()) {
-                Text("Observed blocked cover host", style = MaterialTheme.typography.titleSmall)
+                Text("Observed blocked source origin", style = MaterialTheme.typography.titleSmall)
                 suggestedOrigins.forEach { origin ->
                     val hostAndPort = origin.removePrefix("https://")
                     FilterChip(
@@ -308,7 +324,7 @@ class NovelExtensionsScreen(
                         label = { Text("Add $hostAndPort") },
                     )
                 }
-                Text("Select this host only if you trust this extension to load images from it.", fontSize = 11.sp)
+                Text("Select this origin only if you trust this extension to make requests to it.", fontSize = 11.sp)
             }
             Text("Paste an HTTPS page or source URL. Only its exact host and port are added; HTTP cannot be trusted.", fontSize = 11.sp)
             OutlinedTextField(extraOrigins, onExtraOrigins, label = { Text("Additional HTTPS URLs (one per line)") }, modifier = Modifier.fillMaxWidth(), minLines = 1, maxLines = 4)

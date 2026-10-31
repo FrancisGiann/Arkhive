@@ -106,10 +106,9 @@ class LnReaderNovelSource internal constructor(
         } else {
             manager.execute(id, "searchNovels", listOf(JsonPrimitive(search.take(120)), JsonPrimitive(page)))
         }
-        val rows = result.value?.jsonArray.orEmpty()
-        require(rows.size <= MAX_CATALOG_ITEMS) { "The extension returned too many catalog rows in one page." }
-        val items = rows.mapNotNull(::parseNovelItem)
-        return NovelCatalogPage(items, if (items.isNotEmpty() && page < MAX_CATALOG_PAGES) page + 1 else null,
+        val rows = result.value?.jsonArray ?: JsonArray(emptyList())
+        val items = boundedCatalogRows(rows).mapNotNull(::parseNovelItem)
+        return NovelCatalogPage(items, if (items.isNotEmpty()) page + 1 else null,
             "${name} · source order")
     }
 
@@ -229,7 +228,7 @@ class LnReaderNovelSource internal constructor(
     }
 
     private fun parseFilter(key: String, value: JsonElement): LnReaderFilterDefinition? {
-        if (!key.matches(Regex("[A-Za-z0-9._ -]{1,80}"))) return null
+        if (!isValidLnReaderFilterKey(key)) return null
         val row = value as? JsonObject ?: return null
         val label = row["label"]?.jsonPrimitive?.contentOrNull?.take(100)?.takeIf(String::isNotBlank) ?: key
         val type = row["type"]?.jsonPrimitive?.contentOrNull?.takeIf { it.length in 1..80 } ?: return null
@@ -309,7 +308,6 @@ class LnReaderNovelSource internal constructor(
 
     private companion object {
         const val MAX_CATALOG_PAGES = 40
-        const val MAX_CATALOG_ITEMS = 50
         const val MAX_CHAPTER_PAGES = 40
         const val MAX_CHAPTERS_PER_PAGE = 300
         const val MAX_FILTERS = 64
@@ -318,3 +316,17 @@ class LnReaderNovelSource internal constructor(
         val SUPPORTED_FILTERS = setOf("Text", "Picker", "Checkbox", "Switch", "XCheckbox")
     }
 }
+
+/** Retain every row in a bounded extension response; paging and deduplication happen in the host. */
+internal fun boundedCatalogRows(rows: JsonArray): List<JsonElement> {
+    require(rows.size <= LN_READER_MAX_CATALOG_ROWS_PER_OPERATION) {
+        "The extension returned too many catalog rows in one response."
+    }
+    return rows.toList()
+}
+
+/** Bracket suffixes are valid query parameter names in LNReader multisources such as Kol Novel. */
+internal fun isValidLnReaderFilterKey(key: String): Boolean =
+    key.length in 1..80 && key.matches(Regex("[A-Za-z0-9._ -]+(?:\\[\\])?"))
+
+internal const val LN_READER_MAX_CATALOG_ROWS_PER_OPERATION = 500

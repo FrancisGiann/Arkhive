@@ -18,9 +18,64 @@ await build({
   legalComments: 'none',
   inject: [resolve(root, 'src/buffer-shim.mjs')],
   define: { 'process.env.NODE_ENV': '"production"' },
+  plugins: [{
+    name: 'arkhive-whatwg-url-bare-isolate-encoding',
+    setup(build) {
+      build.onResolve({ filter: /^\.\/(encoding|platform\.js|fallback\/platform\.js|fallback\/utf8\.auto\.js)$/ }, args => {
+        if (args.path === './encoding' && /[/\\]whatwg-url[/\\]lib[/\\]/.test(args.importer)) {
+          return { path: resolve(root, 'src/whatwg-url-encoding.js') };
+        }
+        if ((args.path === './platform.js' || args.path === './fallback/platform.js') &&
+            /[/\\]@exodus[/\\]bytes[/\\]/.test(args.importer)) {
+          // Use Exodus's own pure-JavaScript fallback when the isolate has no TextEncoder or TextDecoder.
+          return { path: resolve(root, 'node_modules/@exodus/bytes/fallback/platform.native.js') };
+        }
+        if (args.path === './fallback/utf8.auto.js' && /[/\\]@exodus[/\\]bytes[/\\]utf8\.js$/.test(args.importer)) {
+          return { path: resolve(root, 'node_modules/@exodus/bytes/fallback/utf8.auto.js') };
+        }
+        return null;
+      });
+    },
+  }],
+  banner: { js: `;(function(){
+    const g=globalThis;
+    const priorShared=Object.getOwnPropertyDescriptor(g,'SharedArrayBuffer');
+    const abProto=ArrayBuffer.prototype;
+    const priorResizable=Object.getOwnPropertyDescriptor(abProto,'resizable');
+    let sabProto=typeof g.SharedArrayBuffer==='function'?g.SharedArrayBuffer.prototype:null;
+    let priorSabByteLength=sabProto&&Object.getOwnPropertyDescriptor(sabProto,'byteLength');
+    let priorGrowable=sabProto&&Object.getOwnPropertyDescriptor(sabProto,'growable');
+    if(!sabProto){
+      function UnsupportedSharedArrayBuffer(){}
+      Object.defineProperties(UnsupportedSharedArrayBuffer.prototype,{
+        byteLength:{configurable:true,get(){throw new TypeError('SharedArrayBuffer is unavailable in this isolated runtime.');}},
+        growable:{configurable:true,get(){return false;}}
+      });
+      Object.defineProperty(g,'SharedArrayBuffer',{configurable:true,writable:true,value:UnsupportedSharedArrayBuffer});
+      sabProto=UnsupportedSharedArrayBuffer.prototype;
+      priorSabByteLength=null;
+      priorGrowable=null;
+    }
+    if(!priorResizable||typeof priorResizable.get!=='function'){
+      Object.defineProperty(abProto,'resizable',{configurable:true,get(){return false;}});
+    }
+    if(!priorSabByteLength||typeof priorSabByteLength.get!=='function'){
+      Object.defineProperty(sabProto,'byteLength',{configurable:true,get(){throw new TypeError('Not a SharedArrayBuffer.');}});
+    }
+    if(!priorGrowable||typeof priorGrowable.get!=='function'){
+      Object.defineProperty(sabProto,'growable',{configurable:true,get(){return false;}});
+    }
+    g.__arkhiveWhatwgInitCleanup=function(){
+      if(priorShared) Object.defineProperty(g,'SharedArrayBuffer',priorShared); else delete g.SharedArrayBuffer;
+      if(priorResizable) Object.defineProperty(abProto,'resizable',priorResizable); else delete abProto.resizable;
+      if(priorSabByteLength) Object.defineProperty(sabProto,'byteLength',priorSabByteLength); else delete sabProto.byteLength;
+      if(priorGrowable) Object.defineProperty(sabProto,'growable',priorGrowable); else delete sabProto.growable;
+      delete g.__arkhiveWhatwgInitCleanup;
+    };
+  })();` },
+  footer: { js: `globalThis.__arkhiveWhatwgInitCleanup?.();` },
 });
 await copyFile(resolve(root, 'bootstrap.js'), resolve(target, 'bootstrap.js'));
-await copyFile(resolve(root, 'src/url-search-params.js'), resolve(target, 'url-search-params.js'));
 
 const lock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'));
 const licenses = resolve(target, 'licenses');
@@ -35,7 +90,7 @@ for (const [packagePath, metadata] of Object.entries(lock.packages)) {
   const packageInfo = JSON.parse(await readFile(resolve(packageDirectory, 'package.json'), 'utf8'));
   let files = [];
   try {
-    files = (await readdir(packageDirectory)).filter(name => /^(licen[cs]e|copying)(\.|$)/i.test(name));
+    files = (await readdir(packageDirectory)).filter(name => /^(licen[cs]e|copying)([-.]|$)/i.test(name));
   } catch { /* The package manifest below makes a missing notice explicit. */ }
   if (files.length === 0 && relativePackagePath === 'boolbase') {
     const name = 'boolbase-upstream-ISC.txt';

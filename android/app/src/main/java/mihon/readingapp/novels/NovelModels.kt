@@ -33,5 +33,6 @@ data class NovelChapterUpdate(val novel: SavedNovel, val chapter: ChapterState)
 @Serializable data class NovelBackupEntry(val sourceId:String,val detail:SourceNovel,val favorite:Boolean,
     val lastChapterPath:String?=null,val lastRead:Long=0,val chapters:List<NovelChapterBackup>)
 data class NovelDownload(val id: String, val novelId: String, val novelTitle: String, val chapterPath: String,
-    val chapterName: String, val state: String, val attempts: Int, val error: String?, val token: String)
+    val chapterName: String, val state: String, val attempts: Int, val error: String?, val token: String,
+    val sourceId: String = "", val originReview: String? = null)
 data class NovelLibraryState(val novels: List<SavedNovel> = emptyList(), val downloads: List<NovelDownload> = emptyList(), val paused: Boolean = false)

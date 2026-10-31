@@ -51,6 +51,7 @@ import mihon.readingapp.settings.InkSettingsTheme
 import org.jsoup.nodes.Entities
 import mihon.readingapp.library.ReadingSessionMeter
 import mihon.readingapp.library.ReadingRoom
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 import mihon.icons.materialsymbols.MaterialSymbols
 import mihon.icons.materialsymbols.automirroredrounded.ArrowBack
 import mihon.icons.materialsymbols.automirroredrounded.FormatListBulleted
@@ -81,6 +82,7 @@ class NovelReaderActivity : BaseActivity() {
     private var current by mutableStateOf<ChapterState?>(null)
     private var ready by mutableStateOf(false)
     private var message by mutableStateOf<String?>(null)
+    private var originReview by mutableStateOf<String?>(null)
     private var menu by mutableStateOf(true)
     private var contents by mutableStateOf(false)
     private var options by mutableStateOf(false)
@@ -123,6 +125,14 @@ class NovelReaderActivity : BaseActivity() {
     private var automationStartJob: Job? = null
     private val progressHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val persistAfterScroll = Runnable {persist()}
+    private fun reviewSourceOrigin(origin: String) {
+        val sourceId = novel?.sourceId?.takeIf(LN_READER_SOURCE_ID::matches) ?: return
+        if (ready) persist()
+        runCatching {
+            startActivity(NovelExtensionOriginReviewActivity.intent(this, sourceId, origin))
+        }
+            .onFailure { message = it.message ?: "The source origin could not be reviewed safely." }
+    }
     private var touchX = 0f
     private var touchY = 0f
     private var touchTime = 0L
@@ -415,7 +425,7 @@ class NovelReaderActivity : BaseActivity() {
         meter.pause()
         if (previewAnchor == null) persist()
         progressHandler.removeCallbacks(persistAfterScroll); loadJob?.cancel(); auto.pause(ReaderAutomationPause.CHAPTER_END)
-        boundary++; current = chapter; lastMeasuredProgress=chapter.progression.coerceIn(0.0,1.0); ready = false; message = null; body = ""; web.visibility = View.INVISIBLE
+        boundary++; current = chapter; lastMeasuredProgress=chapter.progression.coerceIn(0.0,1.0); ready = false; message = null; originReview = null; body = ""; web.visibility = View.INVISIBLE
         loadJob = lifecycleScope.launch {
             try {
                 body = repository.text(requireNotNull(novel).id, chapter.id)
@@ -427,6 +437,7 @@ class NovelReaderActivity : BaseActivity() {
                   if (pendingReturnCandidate?.first == chapter.id) pendingReturnCandidate = null
                   if (pendingReturnConsumeChapter == chapter.id) pendingReturnConsumeChapter = null
                   message = error.message ?: "Chapter unavailable. Retry when connected."
+                  originReview = (error as? LnReaderUnapprovedSourceOriginException)?.origin
               }
         }
     }
@@ -902,6 +913,11 @@ class NovelReaderActivity : BaseActivity() {
                         }
                         NovelReaderStatus.ERROR -> {
                             Text(message ?: "Chapter unavailable.", color = ink)
+                            originReview?.let { origin ->
+                                OutlinedButton(onClick = { reviewSourceOrigin(origin) }) {
+                                    Text("Review source origin")
+                                }
+                            }
                             TextButton(onClick = { current?.let(::open) }) { Text("Retry chapter") }
                         }
                     }

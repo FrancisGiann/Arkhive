@@ -12,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.UUID
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 
 @RunWith(AndroidJUnit4::class)
 class NovelUpgradeAndInboxRuntimeTest {
@@ -58,6 +59,8 @@ class NovelUpgradeAndInboxRuntimeTest {
                     arrayOf<Any>(novelId, source.id, source.workPath, source.workName, encodedDetail, chapterId, 123456789L))
                 oldDb.execSQL("INSERT INTO novel_chapters(id,novel_id,path,name,position,active,progress,bookmark,saved) VALUES(?,?,?,?,0,1,0.48,1,0)",
                     arrayOf<Any>(chapterId, novelId, "existing-chapter", "Existing Chapter"))
+                oldDb.execSQL("INSERT INTO novel_queue(id,state,attempts,error,token,added) VALUES(?,'failed',2,?,?,?)",
+                    arrayOf<Any>(chapterId, "Previous network error", "legacy-token", 987654321L))
                 oldDb.version = 1
             } finally {
                 oldDb.close()
@@ -85,6 +88,25 @@ class NovelUpgradeAndInboxRuntimeTest {
                     0L, refreshed.getValue("existing-chapter").arrivedAt)
                 assertTrue(refreshed.getValue("newly-observed").arrivedAt >= beforeRefresh)
                 assertEquals(setOf("newly-observed"), repo.updates(beforeRefresh - 1).map { it.chapter.path }.toSet())
+
+                val retainedQueue = repo.state.value.downloads.single()
+                assertEquals("The additive v1-to-v3 migration retains the failed row state.", "failed", retainedQueue.state)
+                assertEquals("The prior queue error remains available after migration.", "Previous network error", retainedQueue.error)
+                assertEquals("Queue rows retain their title's source identity.", source.id, retainedQueue.sourceId)
+                assertNull("Legacy queue rows have no fabricated origin approval request.", retainedQueue.originReview)
+
+                source.chapterFailure = LnReaderUnapprovedSourceOriginException("https://api.fixture.invalid:443")
+                repo.retry(chapterId)
+                val blockedDownload = requireNotNull(repo.claim())
+                repo.runDownload(blockedDownload)
+                val stoppedQueue = repo.state.value.downloads.single()
+                assertEquals("An explicit origin block stops automatic queue retries.", "failed", stoppedQueue.state)
+                assertEquals("The typed origin is stored separately from its display message.",
+                    "https://api.fixture.invalid:443", stoppedQueue.originReview)
+                assertEquals("A blocked download does not change reading progress.", 0.48,
+                    repo.chapters(novelId).first().progression, 0.0001)
+                assertTrue("A blocked download does not change bookmarks.", repo.chapters(novelId).first().bookmark)
+                assertEquals("An explicit retry starts a fresh attempt.", 1, stoppedQueue.attempts)
             } finally {
                 runCatching { repo.closeForTest() }
             }

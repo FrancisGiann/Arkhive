@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import mihon.app.di.appGraph
 import mihon.readingapp.novels.LnReaderNovelSource
@@ -75,11 +76,25 @@ class LnReaderNovelAdapterRuntimeTest {
                 descriptor.filters.single { it.key == "requiredGenres" }.defaultValue.toString(),
             )
             assertEquals("{}", descriptor.filters.single { it.key == "optionalGenres" }.defaultValue.toString())
+            assertEquals("[\"fantasy\"]", descriptor.filters.single { it.key == "genre[]" }.defaultValue.toString())
+            assertEquals("[\"web-novel\"]", descriptor.filters.single { it.key == "type[]" }.defaultValue.toString())
+            source.setFilterValues(mapOf(
+                "genre[]" to JsonArray(listOf(JsonPrimitive("fantasy"))),
+                "type[]" to JsonArray(listOf(JsonPrimitive("web-novel"))),
+            ))
 
             val catalog = source.catalog(1, "")
-            assertEquals("Catalog ongoing", catalog.items.single().name)
+            assertEquals(500, catalog.items.size)
+            assertEquals("Catalog ongoing/fantasy/web-novel", catalog.items.first().name)
+            assertEquals("catalog-0", catalog.items.first().path)
+            assertEquals("catalog-499", catalog.items.last().path)
+            assertEquals(2, catalog.nextPage)
             assertEquals("Protocol-relative covers are stored as safe absolute HTTPS URLs.",
-                "https://fixture.invalid/cover.png", catalog.items.single().cover)
+                "https://fixture.invalid/cover.png", catalog.items.first().cover)
+            val secondCatalogPage = source.catalog(2, "")
+            assertEquals(500, secondCatalogPage.items.size)
+            assertEquals("catalog-500", secondCatalogPage.items.first().path)
+            assertEquals(3, secondCatalogPage.nextPage)
             val searched = source.catalog(1, "lantern")
             assertEquals("Search lantern", searched.items.single().name)
 
@@ -182,6 +197,7 @@ class LnReaderNovelAdapterRuntimeTest {
 
     private class AdapterTransport : LnReaderHostFetch {
         val pluginRequests = AtomicInteger()
+        private val catalogRows = 500
         private val manifest = """[
           {"id":"fixture-adapter","name":"Authored adapter","site":"https://fixture.invalid/","lang":"en","version":"1.0","url":"https://fixture.invalid/plugin.js"}
         ]""".trimIndent().toByteArray()
@@ -205,7 +221,16 @@ class LnReaderNovelAdapterRuntimeTest {
             val body = when {
                 request.url.contains("plugins.json") -> manifest
                 request.url.endsWith("/plugin.js") -> bundle
-                request.url.endsWith("/catalog") -> "<main><article data-path='authored-novel'><h2>Fixture novel</h2></article></main>".toByteArray()
+                request.url.contains("/catalog?") -> {
+                    assertTrue("Bracketed filter names and values reach the reviewed host request.",
+                        request.url.contains("genre[]=fantasy") && request.url.contains("type[]=web-novel"))
+                    val page = request.url.substringAfter("page=").substringBefore('&').toInt()
+                    val first = (page - 1) * catalogRows
+                    val rows = (first until first + catalogRows).joinToString("") { index ->
+                        "<article data-path='catalog-$index'></article>"
+                    }
+                    "<main>$rows</main>".toByteArray()
+                }
                 request.url.endsWith("/search") -> "<main><h2>Search result</h2></main>".toByteArray()
                 request.url.endsWith("/detail") || request.url.endsWith("/page") -> "{}".toByteArray()
                 request.url.endsWith("/chapter") -> "authored chapter response".toByteArray()
@@ -226,6 +251,7 @@ class LnReaderNovelAdapterRuntimeTest {
     }
 
     private companion object {
+        // The exact bracketed names mirror LNReader's LightNovelWP multisource filters (`genre[]`, `type[]`).
         val COMMON_JS = """
             const { load } = require('cheerio');
             const { fetchApi } = require('@libs/fetch');
@@ -243,12 +269,21 @@ class LnReaderNovelAdapterRuntimeTest {
                 optionalGenres: { label: 'Optional genres', type: 'XCheckbox', value: {}, options: [
                   { label: 'Fantasy', value: 'fantasy' }, { label: 'Mystery', value: 'mystery' }
                 ] },
+                'genre[]': { label: 'Genres', type: 'Checkbox', value: ['fantasy'], options: [
+                  { label: 'Fantasy', value: 'fantasy' }, { label: 'Mystery', value: 'mystery' }
+                ] },
+                'type[]': { label: 'Type', type: 'Checkbox', value: ['web-novel'], options: [
+                  { label: 'Web novel', value: 'web-novel' }, { label: 'Light novel', value: 'light-novel' }
+                ] },
               },
               async popularNovels(pageNo, options) {
-                const response = await fetchApi('https://fixture.invalid/catalog');
+                const genre = options.filters['genre[]'].value.join(',');
+                const type = options.filters['type[]'].value.join(',');
+                const url = 'https://fixture.invalid/catalog?page=' + pageNo + '&genre[]=' + genre + '&type[]=' + type;
+                const response = await fetchApi(url);
                 const $ = load(await response.text());
                 storage.set('catalogFilter', options.filters.status.value);
-                return $('article').map((_, node) => ({ name: 'Catalog ' + options.filters.status.value,
+                return $('article').map((_, node) => ({ name: 'Catalog ' + options.filters.status.value + '/' + genre + '/' + type,
                   path: $(node).attr('data-path'), cover: '//fixture.invalid/cover.png' })).get();
               },
               async searchNovels(term, pageNo) {

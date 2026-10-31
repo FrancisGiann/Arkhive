@@ -23,6 +23,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.net.InetAddress
 
 /** Only self-authored source bytes and fixture.invalid transport responses are executed here. */
 @RunWith(AndroidJUnit4::class)
@@ -72,7 +73,7 @@ class LnReaderSandboxRuntimeTest {
     }
 
     @Test
-    fun urlSearchParamsSupportsCatalogSearchDetailAndChapterBridgeRequests() = runBlocking {
+    fun urlApiSupportsCatalogSearchDetailAndChapterBridgeRequests() = runBlocking {
         val fixtureFetch = UrlSearchParamsFixtureFetch()
         val runtime = LnReaderSandboxRuntime(context, fixtureFetch)
         val approved = setOf("https://fixture.invalid:443")
@@ -83,7 +84,7 @@ class LnReaderSandboxRuntimeTest {
             "popularNovels", listOf(JsonPrimitive(3), Json.parseToJsonElement("""{"filters":{}}""")), approved,
         ).value!!.jsonObject
         assertEquals("catalog", popular["stage"]?.jsonPrimitive?.content)
-        assertEquals("undefined/undefined/undefined", popular["isolated"]?.jsonPrimitive?.content)
+        assertEquals("function/undefined", popular["isolated"]?.jsonPrimitive?.content)
 
         val filteredPopular = runtime.execute(
             "fixture-source", "Authored fixture", "https://fixture.invalid/", "1.0", bundle,
@@ -116,6 +117,54 @@ class LnReaderSandboxRuntimeTest {
         assertEquals("keyword=blue+moon&search=1", fixtureFetch.requests[2].body?.toString(Charsets.UTF_8))
         assertEquals("https://fixture.invalid/detail?path=%2Fstory%2F%E6%9C%88", fixtureFetch.requests[3].url)
         assertEquals("https://fixture.invalid/chapter?path=%2Fchapter%2F%E6%9C%88", fixtureFetch.requests[4].url)
+    }
+
+    @Test
+    fun unapprovedPublicOriginReturnsReviewableHostErrorAfterThePluginRejectsFetch() = runBlocking {
+        val deniedOrigin = "https://api.fixture.invalid:443"
+        val bundle = """
+            const { fetchApi } = require('@libs/fetch');
+            module.exports.default = {
+              id: 'fixture-source', name: 'Authored fixture', site: 'https://fixture.invalid/', version: '1.0',
+              async popularNovels() {
+                try { await fetchApi('https://api.fixture.invalid/catalog'); } catch (_) { return []; }
+                return [];
+              }
+            };
+        """.trimIndent().toByteArray()
+        val delegate = FixtureFetch().apply { currentBundle = bundle }
+        val fetcher = object : LnReaderHostFetch {
+            override suspend fun fetch(
+                request: LnReaderHttpRequest,
+                allowedOrigins: Set<String>,
+                maxBytes: Int,
+            ): LnReaderHttpResponse = if (request.url.startsWith("https://api.fixture.invalid/")) {
+                throw LnReaderUnapprovedSourceOriginException(deniedOrigin)
+            } else {
+                delegate.fetch(request, allowedOrigins, maxBytes)
+            }
+        }
+        val isolatedFiles = File(context.cacheDir, "lnreader-origin-review-${System.currentTimeMillis()}")
+        val isolatedContext = object : ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun getFilesDir(): File = isolatedFiles
+        }
+        try {
+            val manager = LnReaderExtensionManager(isolatedContext, fetcher, LnReaderSandboxRuntime(context, fetcher))
+            val repo = "https://fixture.invalid/origin-review.json"
+            manager.addRepository(repo)
+            manager.refreshRepository(repo)
+            val staged = manager.stagePlugin(repo, "fixture-source")
+            val installed = manager.installReviewed(staged.reviewToken, staged.sha256, staged.requiredOrigins)
+
+            val failure = runCatching {
+                manager.execute(installed.sourceId, "popularNovels", emptyList())
+            }.exceptionOrNull()
+        assertTrue("The blocked host request remains reviewable after rejection: $failure", failure is LnReaderUnapprovedSourceOriginException)
+        assertEquals(deniedOrigin, (failure as LnReaderUnapprovedSourceOriginException).origin)
+        } finally {
+            isolatedFiles.deleteRecursively()
+        }
     }
 
     @Test
@@ -348,7 +397,7 @@ class LnReaderSandboxRuntimeTest {
 
     @Test
     fun strictHttpBrokerRejectsUnsafeTargetsAndSessionHeadersBeforeDnsOrSockets() = runBlocking {
-        val broker = LnReaderHttpBroker()
+        val broker = LnReaderHttpBroker { listOf(InetAddress.getByName("93.184.216.34")) }
         val reviewedFixture = setOf("https://fixture.invalid:443")
         suspend fun rejected(url: String, origins: Set<String>, headers: Map<String, String> = emptyMap()): Throwable {
             val failure = runCatching {
@@ -362,7 +411,9 @@ class LnReaderSandboxRuntimeTest {
         assertTrue(rejected("https://10.0.0.1/", reviewedFixture).message.orEmpty().contains("IP-literal"))
         assertTrue(rejected("https://[fd00::1]/", reviewedFixture).message.orEmpty().contains("IP-literal"))
         assertTrue(rejected("https://localhost/", setOf("https://localhost:443")).message.orEmpty().contains("Local and private"))
-        assertTrue(rejected("https://unreviewed.invalid/", reviewedFixture).message.orEmpty().contains("approved source origins"))
+        val unreviewed = rejected("https://unreviewed.invalid/", reviewedFixture)
+        assertTrue(unreviewed is LnReaderUnapprovedSourceOriginException)
+        assertEquals("https://unreviewed.invalid:443", (unreviewed as LnReaderUnapprovedSourceOriginException).origin)
         assertTrue(rejected("https://fixture.invalid/", reviewedFixture, mapOf("Cookie" to "session=x"))
             .message.orEmpty().contains("Credentials and browser session headers are unsupported"))
         assertTrue(rejected("https://fixture.invalid/", reviewedFixture, mapOf("Authorization" to "Bearer x"))
@@ -477,9 +528,9 @@ class LnReaderSandboxRuntimeTest {
                   else if (value) form.append("include[" + key + "][]", value);
                 }
                 if (form.toString()) { form.append('search', '1'); return this.detailedSearch(form); }
-                const response = await fetchApi('https://fixture.invalid/top-novel/' + pageNo);
+                const response = await fetchApi(new URL('/top-novel/' + pageNo, this.site).href);
                 return {stage: (await response.json()).stage,
-                  isolated: [typeof URL, typeof fetch, typeof globalThis.android].join('/')};
+                  isolated: [typeof URL, typeof fetch].join('/')};
               },
               async searchNovels(term) {
                 const form = new URLSearchParams();
@@ -493,12 +544,14 @@ class LnReaderSandboxRuntimeTest {
                 return response.json();
               },
               async parseNovel(path) {
-                const params = new URLSearchParams({path});
-                return (await fetchApi('https://fixture.invalid/detail?' + params)).json();
+                const url = new URL('/detail', this.site);
+                url.searchParams.set('path', path);
+                return (await fetchApi(url.href)).json();
               },
               async parseChapter(path) {
-                const params = new URLSearchParams(); params.set('path', path);
-                return (await fetchApi('https://fixture.invalid/chapter?' + params.toString())).text();
+                const url = new URL('/chapter', this.site);
+                url.searchParams.set('path', path);
+                return (await fetchApi(url.href)).text();
               }
             };
         """.trimIndent()

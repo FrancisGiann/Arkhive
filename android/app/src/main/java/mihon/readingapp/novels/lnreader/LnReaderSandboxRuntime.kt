@@ -47,9 +47,6 @@ class LnReaderSandboxRuntime(
     private val helpers by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         helperBundle ?: appContext.assets.open(HELPER_ASSET).use { it.readBytes() }
     }
-    private val urlSearchParamsShim by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        appContext.assets.open(URL_SEARCH_PARAMS_ASSET).use { it.readBytes() }
-    }
     private val bootstrapSource by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         bootstrap ?: appContext.assets.open(BOOTSTRAP_ASSET).bufferedReader(Charsets.UTF_8).use { it.readText() }
     }
@@ -139,7 +136,6 @@ class LnReaderSandboxRuntime(
                         put("userAgent", JsonPrimitive(userAgent))
                     }
                     runtime.provideNamedData("lr-helper-bundle", helpers)
-                    runtime.provideNamedData("lr-url-search-params", urlSearchParamsShim)
                     runtime.provideNamedData("lr-plugin-bundle", bundle)
                     runtime.provideNamedData("lr-operation-input", operationInput.toString().toByteArray(Charsets.UTF_8))
                     val ready = runtime.evaluateJavaScriptAsync(bootstrapSource).awaitCancellable()
@@ -215,6 +211,7 @@ class LnReaderSandboxRuntime(
                             } catch (failure: CancellationException) {
                                 throw failure
                             } catch (failure: Throwable) {
+                                if (failure is LnReaderUnapprovedSourceOriginException) throw failure
                                 val expression = "globalThis.__lnReaderReject(${request.id}, ${JsonPrimitive(failure.rootMessage().take(1000))})"
                                 runtime.evaluateJavaScriptAsync(expression).awaitCancellable()
                             }
@@ -280,7 +277,6 @@ class LnReaderSandboxRuntime(
 
     private companion object {
         const val HELPER_ASSET = "lnreader/helpers.js"
-        const val URL_SEARCH_PARAMS_ASSET = "lnreader/url-search-params.js"
         const val BOOTSTRAP_ASSET = "lnreader/bootstrap.js"
         const val DEFAULT_USER_AGENT = "Arkhive/0.4.1 isolated LNReader source client"
         const val MAX_HEAP_BYTES = 64L * 1024 * 1024

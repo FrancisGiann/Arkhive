@@ -3,9 +3,11 @@ package mihon.readingapp.novels
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 
 data class NovelBrowseState(val query:String="",val genre:String?=null,val items:List<NovelItem> = emptyList(),
-    val page:Int=0,val next:Int?=1,val busy:Boolean=false,val error:String?=null,val basis:String="",val checked:Long=0,val revision:Long=0)
+    val page:Int=0,val next:Int?=1,val busy:Boolean=false,val error:String?=null,val basis:String="",val checked:Long=0,val revision:Long=0,
+    val originReview:String?=null,val notice:String?=null)
 
 /** Retained, bounded source order with cancellation and generation-checked commits. */
 class NovelCatalogPager(private val scope:CoroutineScope,private val source:NovelSource) {
@@ -35,7 +37,7 @@ class NovelCatalogPager(private val scope:CoroutineScope,private val source:Nove
             revision = generation,
         )
     }
-    fun retry() {mutable.value=mutable.value.copy(error=null);loadNext()}
+    fun retry() {mutable.value=mutable.value.copy(error=null,originReview=null);loadNext()}
     fun loadNext() {
         val before=mutable.value;val page=before.next ?: return
         if(before.busy || before.error!=null) return
@@ -47,10 +49,30 @@ class NovelCatalogPager(private val scope:CoroutineScope,private val source:Nove
                 val known=before.items.mapTo(hashSetOf()){it.path};val added=result.items.filter {known.add(it.path)}
                 val repeated=page>1 && result.items.isNotEmpty() && added.isEmpty()
                 check(result.nextPage==null || result.nextPage==page+1) {"Unsupported source continuation."}
-                mutable.value=before.copy(items=before.items+added,page=page,next=if(repeated || page>=40) null else result.nextPage,
-                    busy=false,error=null,basis=result.basis,checked=System.currentTimeMillis())
+                val room=(MAX_RETAINED_CATALOG_ITEMS-before.items.size).coerceAtLeast(0)
+                val retained=added.take(room)
+                val dropped=retained.size<added.size
+                val stoppedAtPageLimit=page>=MAX_CATALOG_PAGES && result.nextPage!=null
+                val stoppedAtCatalogLimit=before.items.size+retained.size>=MAX_RETAINED_CATALOG_ITEMS && result.nextPage!=null
+                val notice=when {
+                    repeated -> "This source repeated earlier results. Loading stopped to avoid duplicate titles."
+                    dropped || stoppedAtCatalogLimit -> "Showing the first $MAX_RETAINED_CATALOG_ITEMS unique results. Refine your search to see more."
+                    stoppedAtPageLimit -> "Stopped after $MAX_CATALOG_PAGES pages. Refine your search to see more."
+                    else -> null
+                }
+                mutable.value=before.copy(items=before.items+retained,page=page,
+                    next=if(repeated || dropped || stoppedAtCatalogLimit || stoppedAtPageLimit) null else result.nextPage,
+                    busy=false,error=null,basis=result.basis,checked=System.currentTimeMillis(),notice=notice)
             } catch(cancelled:CancellationException) {throw cancelled}
-              catch(error:Exception) {if(token==generation) mutable.value=mutable.value.copy(busy=false,error=error.message ?: "This source is unavailable.")}
+              catch(error:Exception) {if(token==generation) mutable.value=mutable.value.copy(
+                  busy=false,error=error.message ?: "This source is unavailable.",
+                  originReview=(error as? LnReaderUnapprovedSourceOriginException)?.origin,
+              )}
         }
+    }
+
+    private companion object {
+        const val MAX_CATALOG_PAGES=40
+        const val MAX_RETAINED_CATALOG_ITEMS=2_000
     }
 }

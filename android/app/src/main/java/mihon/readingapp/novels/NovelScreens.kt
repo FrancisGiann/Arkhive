@@ -60,6 +60,8 @@ import mihon.icons.materialsymbols.rounded.Info
 import mihon.icons.materialsymbols.rounded.LocalLibrary
 import mihon.icons.materialsymbols.rounded.Public
 import mihon.readingapp.novels.lnreader.LnReaderUnapprovedCoverOriginException
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
+import mihon.readingapp.novels.lnreader.normalizePublicHttpsOrigin
 
 class NovelCatalogScreen(private val sourceId: String) : Screen() {
     @Composable override fun Content() = NovelCatalog(sourceId)
@@ -119,7 +121,7 @@ class NovelCatalogScreen(private val sourceId: String) : Screen() {
                 extensionSource!=null -> TextButton(onClick={filters=true}) {Text(if(extensionDescriptor?.filters.isNullOrEmpty()) "Source filters" else "${extensionDescriptor?.filters?.size} source filters")}
             }
         }
-        LazyColumn(Modifier.weight(1f).clip(RoundedCornerShape(topStart=18.dp,topEnd=18.dp)).background(Ink.Panel),state=grid,
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(topStart=18.dp,topEnd=18.dp)).background(Ink.Panel),state=grid,
             contentPadding=PaddingValues(22.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             if(titles.isEmpty() && busy) item {LinearProgressIndicator(Modifier.fillMaxWidth())}
             items(titles,key={it.path}) {title->Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Ink.Raised).clickable {nav.push(NovelDetailScreen(source.id,title.path))}.padding(14.dp),horizontalArrangement=Arrangement.spacedBy(14.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -128,9 +130,18 @@ class NovelCatalogScreen(private val sourceId: String) : Screen() {
                 Text("›",color=Ink.Link,fontSize=26.sp)
             }}
             item {
-                if(error!=null) {Text(error!!,color=Ink.Muted);TextButton(onClick=pager::retry) {Text("Retry source")}}
+                if(error!=null) {
+                    Text(error!!,color=Ink.Muted)
+                    state.originReview?.takeIf { extensionSource!=null }?.let { origin ->
+                        OutlinedButton(onClick={nav.push(NovelExtensionsScreen(origin,source.id))},modifier=Modifier.heightIn(min=48.dp)) {
+                            Text("Review source origin")
+                        }
+                    }
+                    TextButton(onClick=pager::retry) {Text("Retry source")}
+                }
                 else if(busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 else if(titles.isEmpty()) Text("No novels returned for this query. Try fewer words or another genre.",color=Ink.Muted)
+                else if(state.notice!=null) Text(state.notice!!,color=Ink.Muted,fontSize=11.sp)
                 else if(next==null) Text("End of this source's results",color=Ink.Muted,fontSize=11.sp)
                 else TextButton(onClick=pager::loadNext) {Text("Load more")}
             }
@@ -163,6 +174,7 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
     var busy by remember {mutableStateOf(true)};var error by remember {mutableStateOf<String?>(null)};var refresh by remember {mutableIntStateOf(0)}
     var coverError by remember {mutableStateOf<String?>(null)}
     var coverOriginSuggestion by remember {mutableStateOf<String?>(null)}
+    var sourceOriginSuggestion by remember {mutableStateOf<String?>(null)}
     var coverRetry by remember {mutableIntStateOf(0)}
     var tools by remember { mutableStateOf(false) }
     var synopsis by remember { mutableStateOf(false) }
@@ -177,12 +189,15 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
     }
     suspend fun reload() {val id=NovelRepository.novelId(sourceId,path);novel=repository.get(id);chapters=repository.chapters(id)}
     LaunchedEffect(sourceId,path,refresh) {
-        busy=true;error=null
+        busy=true;error=null;sourceOriginSuggestion=null
         try {val id=NovelRepository.novelId(sourceId,path);novel=repository.get(id)
             if(novel==null || refresh>0) novel=repository.load(sourceId,path)
             reload()
         } catch(cancelled:CancellationException) {throw cancelled}
-          catch(problem:Exception) {error=problem.message ?: "The source is unavailable."}
+          catch(problem:Exception) {
+              error=problem.message ?: "The source is unavailable."
+              sourceOriginSuggestion=(problem as? LnReaderUnapprovedSourceOriginException)?.origin
+          }
         finally {busy=false}
     }
     LaunchedEffect(updates) {if(novel!=null) reload()}
@@ -294,6 +309,12 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                     error?.let { problem ->
                         Text(problem, color = Ink.Muted)
+                        sourceOriginSuggestion?.let { origin ->
+                            OutlinedButton(
+                                onClick = { nav.push(NovelExtensionsScreen(origin, sourceId)) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            ) { Text("Review source origin") }
+                        }
                         TextButton(onClick = { refresh++ }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Retry source") }
                     }
                     novel?.let { n ->
@@ -408,6 +429,12 @@ class NovelDownloadsScreen : Screen() {
                     Text(job.novelTitle,color=Ink.Text);Text(job.chapterName,color=Ink.Muted,fontSize=12.sp)
                     Text(job.state.replaceFirstChar(Char::uppercase),color=Ink.Link,fontSize=11.sp)
                     job.error?.let {Text(it,color=Ink.Muted,fontSize=11.sp)}
+                    val reviewOrigin=job.originReview?.let {runCatching {normalizePublicHttpsOrigin(it)}.getOrNull()}
+                    if(job.state=="failed" && reviewOrigin!=null && job.sourceId.matches(LN_READER_SOURCE_ID)) {
+                        OutlinedButton(onClick={context.startActivity(NovelExtensionOriginReviewActivity.intent(context,job.sourceId,reviewOrigin))},modifier=Modifier.heightIn(min=48.dp)) {
+                            Text("Review source origin")
+                        }
+                    }
                     Row {if(job.state=="failed" || job.state=="retry") TextButton(onClick={scope.launch {repository.retry(job.id)}}) {Text("Retry")}
                         TextButton(onClick={scope.launch {repository.cancel(job.id)}}) {Text("Cancel")}}
                 }}
