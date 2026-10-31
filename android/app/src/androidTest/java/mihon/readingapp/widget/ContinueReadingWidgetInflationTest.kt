@@ -102,6 +102,80 @@ class ContinueReadingWidgetInflationTest {
     }
 
     @Test
+    fun bookplateFitsLongTitleProgressAndResumeAt160And180Dp() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val tinyImage = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        val portraitCover = Bitmap.createBitmap(240, 340, Bitmap.Config.ARGB_8888)
+        val click = PendingIntent.getActivity(
+            context, 19, Intent(context, MainActivity::class.java).setAction(ContinueReadingWidget.ACTION)
+                .putExtra(ContinueReadingWidget.KEY, "manga:42"),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        for ((size, layout) in listOf(
+            160 to R.layout.continue_reading_widget_compact_small,
+            180 to R.layout.continue_reading_widget_compact,
+        )) {
+            val metrics = compactBookplateMetrics(size, size)
+            val content = RemoteViews(context.packageName, layout).apply {
+                setImageViewBitmap(R.id.continue_bookplate_background, tinyImage)
+                setImageViewBitmap(R.id.continue_bookplate_cover, portraitCover)
+                setImageViewBitmap(R.id.continue_bookplate_ring, tinyImage)
+                setTextViewText(R.id.continue_bookplate_title, "Childhood Friend of the Zenith")
+                setInt(R.id.continue_bookplate_title, "setMaxLines", metrics.maxTitleLines)
+                setTextViewText(R.id.continue_bookplate_percent, "17%")
+                setTextViewText(R.id.continue_bookplate_count, "19 / 110")
+                setTextViewText(R.id.continue_bookplate_read_label, "read")
+                setTextViewText(R.id.continue_bookplate_resume_text, "Resume reading")
+                setViewVisibility(R.id.continue_bookplate_progress, View.VISIBLE)
+                setContentDescription(R.id.continue_root, "Resume reading Childhood Friend of the Zenith. 19 / 110 read")
+                setContentDescription(R.id.continue_bookplate_resume, "Resume reading")
+                setOnClickPendingIntent(R.id.continue_root, click)
+                setOnClickPendingIntent(R.id.continue_bookplate_resume, click)
+            }
+            val rendered = content.apply(context, FrameLayout(context))
+            val cover = rendered.findViewById<View>(R.id.continue_bookplate_cover)
+            val title = rendered.findViewById<TextView>(R.id.continue_bookplate_title)
+            val progress = rendered.findViewById<View>(R.id.continue_bookplate_progress)
+            val ring = rendered.findViewById<View>(R.id.continue_bookplate_ring)
+            val count = rendered.findViewById<View>(R.id.continue_bookplate_count)
+            val resume = rendered.findViewById<View>(R.id.continue_bookplate_resume)
+            val action = rendered.findViewById<TextView>(R.id.continue_bookplate_resume_text)
+            val density = context.resources.displayMetrics.density
+            val widthPx = (size * density).toInt()
+            val heightPx = (size * density).toInt()
+            rendered.measure(
+                View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(heightPx, View.MeasureSpec.EXACTLY),
+            )
+            rendered.layout(0, 0, widthPx, heightPx)
+            fun bounds(view: View) = Rect(0, 0, view.width, view.height).also {
+                (rendered as ViewGroup).offsetDescendantRectToMyCoords(view, it)
+            }
+
+            assertTrue("cover scales with the roomy compact widget", cover.width / density >= 68f)
+            assertTrue("cover stays left of the title", bounds(cover).right < bounds(title).left)
+            assertTrue("title clears the progress stack", bounds(title).bottom <= bounds(progress).top)
+            assertTrue("ring clears the count", bounds(ring).bottom <= bounds(count).top)
+            assertTrue("progress stays above the action", bounds(progress).bottom <= bounds(resume).top)
+            assertTrue("action stays inside the card", bounds(resume).bottom <= heightPx)
+            assertEquals("Childhood Friend of the Zenith", title.text.toString())
+            assertEquals("Resume reading", action.text.toString())
+            assertEquals(11.5f, action.textSize / context.resources.displayMetrics.scaledDensity, .1f)
+            assertNotNull(resume.contentDescription)
+
+            RemoteViews(context.packageName, layout).apply {
+                setTextViewText(R.id.continue_bookplate_title, "Your next chapter")
+                setTextViewText(R.id.continue_bookplate_resume_text, "Open library")
+                setContentDescription(R.id.continue_root, "Open library")
+                setViewVisibility(R.id.continue_bookplate_progress, View.GONE)
+            }.reapply(context, rendered)
+            assertEquals("Your next chapter", title.text.toString())
+            assertEquals("Open library", action.text.toString())
+            assertEquals(View.GONE, progress.visibility)
+        }
+    }
+
+    @Test
     fun widgetRequestCarriesTheResumeKeyOnlyOnce() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val intent = Intent(context, MainActivity::class.java).setAction(ContinueReadingWidget.ACTION)
@@ -124,7 +198,7 @@ class ContinueReadingWidgetInflationTest {
             context, 17, Intent(context, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        for (layout in listOf(R.layout.continue_reading_widget, R.layout.continue_reading_widget_compact)) {
+        for (layout in listOf(R.layout.continue_reading_widget, R.layout.continue_reading_widget_compact_legacy)) {
             val content = RemoteViews(context.packageName, layout).apply {
                 setTextViewText(R.id.continue_title, "Childhood Friend of the Zenith and a long subtitle")
                 setInt(R.id.continue_title, "setMaxLines", 2)
@@ -134,7 +208,7 @@ class ContinueReadingWidgetInflationTest {
                 setImageViewBitmap(R.id.continue_progress, tinyImage)
                 setImageViewBitmap(R.id.continue_arrow_background, tinyImage)
                 setImageViewBitmap(R.id.continue_kind_background, tinyImage)
-                if (layout == R.layout.continue_reading_widget_compact) {
+                if (layout == R.layout.continue_reading_widget_compact_legacy) {
                     setViewVisibility(R.id.continue_cover, View.GONE)
                     setViewVisibility(R.id.continue_label, View.GONE)
                 } else setImageViewBitmap(R.id.continue_cover, portraitCover)
@@ -145,7 +219,7 @@ class ContinueReadingWidgetInflationTest {
             assertNotNull(rendered.findViewById<View>(R.id.continue_cover))
             assertEquals("Childhood Friend of the Zenith and a long subtitle",
                 rendered.findViewById<TextView>(R.id.continue_title).text.toString())
-            if (layout == R.layout.continue_reading_widget_compact) {
+            if (layout == R.layout.continue_reading_widget_compact_legacy) {
                 for ((width, height) in listOf(110 to 110, 160 to 176)) {
                     RemoteViews(context.packageName, layout).apply {
                         setInt(R.id.continue_title, "setMaxLines", if (width == 110) 1 else 2)

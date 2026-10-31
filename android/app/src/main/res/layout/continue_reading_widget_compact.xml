@@ -2,40 +2,78 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/continue_root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
-    <!-- Artwork and the dark reading footer are rendered together to keep rounded corners on launchers. -->
-    <ImageView android:id="@+id/continue_background"
+    android:layout_height="match_parent"
+    android:contentDescription="@string/continue_widget_open_library">
+
+    <ImageView android:id="@+id/continue_bookplate_background"
         android:layout_width="match_parent" android:layout_height="match_parent"
-        android:scaleType="fitXY" android:importantForAccessibility="no"/>
-    <!-- Retained for RemoteViews actions shared with the large widget; compact artwork is in the background. -->
-    <ImageView android:id="@+id/continue_cover" android:layout_width="1dp" android:layout_height="1dp"
-        android:visibility="gone" android:importantForAccessibility="no"/>
-    <TextView android:id="@+id/continue_label" android:layout_width="1dp" android:layout_height="1dp"
-        android:visibility="gone" android:importantForAccessibility="no"/>
-    <TextView android:id="@+id/continue_author" android:layout_width="1dp" android:layout_height="1dp"
-        android:visibility="gone" android:importantForAccessibility="no"/>
-    <FrameLayout android:id="@+id/continue_kind_container" android:layout_width="1dp" android:layout_height="1dp"
-        android:visibility="gone" android:importantForAccessibility="no">
-        <ImageView android:id="@+id/continue_kind_background" android:layout_width="match_parent" android:layout_height="match_parent"/>
-        <TextView android:id="@+id/continue_kind" android:layout_width="match_parent" android:layout_height="match_parent"/>
-    </FrameLayout>
-    <FrameLayout android:layout_width="match_parent" android:layout_height="61dp" android:layout_gravity="bottom">
-        <TextView android:id="@+id/continue_title" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginStart="8dp" android:layout_marginEnd="8dp" android:layout_marginTop="6dp"
-            android:fontFamily="@font/ink_display" android:textSize="11sp" android:maxLines="2"
-            android:ellipsize="end" android:text="Continue reading"/>
-        <TextView android:id="@+id/continue_status" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_gravity="bottom" android:layout_marginStart="8dp" android:layout_marginEnd="39dp"
-            android:layout_marginBottom="17dp" android:textSize="8sp" android:maxLines="1" android:ellipsize="end"/>
-        <ImageView android:id="@+id/continue_progress" android:layout_width="match_parent" android:layout_height="3dp"
-            android:layout_gravity="bottom" android:layout_marginStart="8dp" android:layout_marginEnd="39dp"
-            android:layout_marginBottom="8dp" android:scaleType="fitXY" android:importantForAccessibility="no"/>
-    </FrameLayout>
-    <FrameLayout android:layout_width="28dp" android:layout_height="28dp"
-        android:layout_gravity="bottom|end" android:layout_margin="7dp" android:importantForAccessibility="no">
-        <ImageView android:id="@+id/continue_arrow_background" android:layout_width="match_parent"
-            android:layout_height="match_parent" android:scaleType="fitXY"/>
-        <TextView android:id="@+id/continue_arrow" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:gravity="center" android:text="➜" android:textSize="18sp"/>
-    </FrameLayout>
+        android:scaleType="fitXY" android:src="@drawable/continue_reading_compact_card"
+        android:importantForAccessibility="no"/>
+
+    <LinearLayout android:id="@+id/continue_bookplate_content"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:padding="6dp">
+        <LinearLayout android:id="@+id/continue_bookplate_main"
+            android:layout_width="match_parent" android:layout_height="0dp"
+            android:layout_weight="1" android:orientation="horizontal">
+            <ImageView android:id="@+id/continue_bookplate_cover"
+                android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="0.94" android:background="@drawable/continue_reading_compact_cover"
+                android:clipToOutline="true" android:scaleType="centerCrop"
+                android:src="@drawable/readingapp_icon" android:contentDescription="@string/continue_widget_cover_description"
+                android:importantForAccessibility="no"/>
+            <LinearLayout android:id="@+id/continue_bookplate_copy"
+                android:layout_width="0dp" android:layout_height="match_parent"
+                android:layout_weight="1" android:layout_marginStart="7dp"
+                android:orientation="vertical" android:paddingTop="2dp" android:paddingBottom="2dp">
+                <TextView android:id="@+id/continue_bookplate_title"
+                    android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+                    android:fontFamily="@font/ink_display" android:textColor="#FFFFFFFF"
+                    android:textSize="14sp" android:maxLines="4" android:includeFontPadding="false"
+                    android:ellipsize="end" android:text="Your next chapter"/>
+                <LinearLayout android:id="@+id/continue_bookplate_progress"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:visibility="gone">
+                    <FrameLayout android:layout_width="32dp" android:layout_height="32dp">
+                        <ImageView android:id="@+id/continue_bookplate_ring"
+                            android:layout_width="match_parent" android:layout_height="match_parent"
+                            android:importantForAccessibility="no"/>
+                        <TextView android:id="@+id/continue_bookplate_percent"
+                            android:layout_width="match_parent" android:layout_height="match_parent"
+                            android:gravity="center" android:fontFamily="@font/ink_body"
+                            android:textColor="#FFFFFFFF" android:textSize="8.5sp"
+                            android:includeFontPadding="false" android:text="17%"/>
+                    </FrameLayout>
+                    <TextView android:id="@+id/continue_bookplate_count"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp" android:fontFamily="@font/ink_display"
+                        android:textColor="#FFFFFFFF" android:textSize="12sp"
+                        android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end"
+                        android:text="19 / 110"/>
+                    <TextView android:id="@+id/continue_bookplate_read_label"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp" android:fontFamily="@font/ink_body"
+                        android:textColor="#FFE5DEEC" android:textSize="8.5sp"
+                        android:includeFontPadding="false" android:maxLines="1" android:text="read"/>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/continue_bookplate_resume"
+            android:layout_width="match_parent" android:layout_height="33dp"
+            android:layout_marginTop="4dp" android:background="@drawable/continue_reading_compact_resume"
+            android:gravity="center_vertical" android:orientation="horizontal"
+            android:paddingStart="11dp" android:paddingEnd="11dp" android:contentDescription="@string/continue_widget_open_library">
+            <TextView android:id="@+id/continue_bookplate_resume_text"
+                android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
+                android:gravity="center_vertical" android:fontFamily="@font/ink_body"
+                android:textColor="#FF2E2441" android:textStyle="bold" android:textSize="11.5sp"
+                android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end"
+                android:importantForAccessibility="no" android:text="Open library"/>
+            <TextView android:id="@+id/continue_bookplate_resume_arrow"
+                android:layout_width="wrap_content" android:layout_height="match_parent"
+                android:gravity="center" android:fontFamily="@font/ink_body" android:text="→"
+                android:textColor="#FF2E2441" android:textSize="15sp" android:includeFontPadding="false"
+                android:importantForAccessibility="no"/>
+        </LinearLayout>
+    </LinearLayout>
 </FrameLayout>

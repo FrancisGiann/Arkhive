@@ -17,6 +17,7 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Path
+import android.util.TypedValue
 import android.view.View
 import androidx.core.graphics.drawable.toBitmap
 import coil3.asDrawable
@@ -102,6 +103,67 @@ open class ContinueReadingWidget : AppWidgetProvider() {
             }
             canvas.drawRect(0f, height - 61f, width.toFloat(), height.toFloat(),
                 Paint().apply { color = Color.rgb(37, 30, 60) })
+            return result
+        }
+
+        private fun compactBookplateBackground(context: Context, width: Int, height: Int, metrics: CompactBookplateMetrics): Bitmap {
+            val density = context.resources.displayMetrics.density.coerceIn(1f, 2.5f)
+            val result = Bitmap.createBitmap((width * density).roundToInt(), (height * density).roundToInt(), Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(result).apply { scale(density, density) }
+            canvas.drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), metrics.cornerRadius,
+                metrics.cornerRadius, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(49, 40, 69) })
+            return result
+        }
+
+        private fun compactBookplateCover(context: Context, cover: Bitmap?, metrics: CompactBookplateMetrics): Bitmap {
+            val density = context.resources.displayMetrics.density.coerceIn(1f, 2.5f)
+            val width = (metrics.coverWidth * density).roundToInt().coerceAtLeast(1)
+            val height = (metrics.coverHeight * density).roundToInt().coerceAtLeast(1)
+            val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(result)
+            canvas.scale(density, density)
+            canvas.clipPath(Path().apply {
+                addRoundRect(RectF(0f, 0f, metrics.coverWidth, metrics.coverHeight), 7f * metrics.scale,
+                    7f * metrics.scale, Path.Direction.CW)
+            })
+            val source = cover?.takeIf { it.width > 0 && it.height > 0 }?.forWidgetCanvas()
+            if (source != null) {
+                val sourceAspect = source.width.toFloat() / source.height
+                val targetAspect = metrics.coverWidth / metrics.coverHeight
+                val cropWidth = if (sourceAspect > targetAspect) (source.height * targetAspect).roundToInt().coerceIn(1, source.width) else source.width
+                val cropHeight = if (sourceAspect > targetAspect) source.height else (source.width / targetAspect).roundToInt().coerceIn(1, source.height)
+                val left = (source.width - cropWidth) / 2
+                val top = (source.height - cropHeight) / 2
+                canvas.drawBitmap(source, Rect(left, top, left + cropWidth, top + cropHeight),
+                    RectF(0f, 0f, metrics.coverWidth, metrics.coverHeight),
+                    Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            } else {
+                canvas.drawColor(Color.rgb(73, 57, 95))
+                runCatching { context.getDrawable(R.drawable.readingapp_icon)?.toBitmap(42, 42) }
+                    .getOrNull()?.forWidgetCanvas()?.let { icon ->
+                        val side = minOf(metrics.coverWidth, metrics.coverHeight) * .48f
+                        val insetX = (metrics.coverWidth - side) / 2f
+                        val insetY = (metrics.coverHeight - side) / 2f
+                        canvas.drawBitmap(icon, null, RectF(insetX, insetY, insetX + side, insetY + side),
+                            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                    }
+            }
+            return result
+        }
+
+        private fun compactBookplateRing(context: Context, progress: Float, metrics: CompactBookplateMetrics): Bitmap {
+            val density = context.resources.displayMetrics.density.coerceIn(1f, 2.5f)
+            val side = (metrics.ringDiameter * density).roundToInt().coerceAtLeast(1)
+            val result = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(result).apply { scale(density, density) }
+            val inset = metrics.ringStroke / 2f
+            val bounds = RectF(inset, inset, metrics.ringDiameter - inset, metrics.ringDiameter - inset)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = metrics.ringStroke }
+            paint.color = Color.rgb(112, 97, 126)
+            canvas.drawArc(bounds, 0f, 360f, false, paint)
+            paint.color = Color.rgb(216, 163, 255)
+            paint.strokeCap = Paint.Cap.ROUND
+            canvas.drawArc(bounds, -90f, 360f * progress.coerceIn(0f, 1f), false, paint)
             return result
         }
 
@@ -233,9 +295,19 @@ open class ContinueReadingWidget : AppWidgetProvider() {
             val story = selection.story
             (largeIds.map { Triple(it, false, false) } + compactIds.map { Triple(it, true, false) } +
                 hybridIds.map { Triple(it, true, true) }).forEach { (id, compact, hybrid) ->
+                val options = manager.getAppWidgetOptions(id)
+                val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, if (compact) 110 else 280)
+                    .coerceIn(if (compact) 110 else 250, 600)
+                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, if (compact) 110 else 220)
+                    .coerceIn(if (compact) 110 else 200, 400)
+                val fontScale = context.resources.configuration.fontScale
+                val tightCompact = compact && isTightCompactWidget(width, height, fontScale)
+                val bookplate = compact && !hybrid && usesCompactBookplate(width, height, fontScale)
                 val layout = when {
                     hybrid -> R.layout.continue_reading_widget_hybrid
-                    compact -> R.layout.continue_reading_widget_compact
+                    bookplate && (width < 170 || height < 170) -> R.layout.continue_reading_widget_compact_small
+                    bookplate -> R.layout.continue_reading_widget_compact
+                    compact -> R.layout.continue_reading_widget_compact_legacy
                     else -> R.layout.continue_reading_widget
                 }
                 val view = RemoteViews(context.packageName, layout)
@@ -246,11 +318,6 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                 }
                 val scheme = getThemeColorScheme(context, g.uiPreferences.appTheme.get(), dark, g.uiPreferences.themeDarkAmoled.get())
                 val ink = scheme.onPrimary.toArgb()
-                val options = manager.getAppWidgetOptions(id)
-                val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, if (compact) 110 else 280)
-                    .coerceIn(if (compact) 110 else 250, 600)
-                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, if (compact) 110 else 220)
-                    .coerceIn(if (compact) 110 else 200, 400)
                 if (hybrid) {
                     val tight = width < 145 || height < 140 || context.resources.configuration.fontScale > 1.3f
                     val text = if (dark) Color.WHITE else Color.rgb(43, 32, 66)
@@ -291,6 +358,53 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                     manager.updateAppWidget(id, view)
                     return@forEach
                 }
+                if (bookplate) {
+                    val metrics = compactBookplateMetrics(width, height, fontScale)
+                    val copy = compactBookplateCopy(story, locked)
+                    view.setImageViewBitmap(R.id.continue_bookplate_background,
+                        compactBookplateBackground(context, width, height, metrics))
+                    view.setImageViewBitmap(R.id.continue_bookplate_cover,
+                        compactBookplateCover(context, bitmap, metrics))
+                    view.setTextViewText(R.id.continue_bookplate_title, copy.title)
+                    view.setInt(R.id.continue_bookplate_title, "setMaxLines", metrics.maxTitleLines)
+                    view.setTextViewTextSize(R.id.continue_bookplate_title, TypedValue.COMPLEX_UNIT_SP, 14f * metrics.scale)
+                    view.setTextViewTextSize(R.id.continue_bookplate_percent, TypedValue.COMPLEX_UNIT_SP, 8.5f * metrics.scale)
+                    view.setTextViewTextSize(R.id.continue_bookplate_count, TypedValue.COMPLEX_UNIT_SP, 12f * metrics.scale)
+                    view.setTextViewTextSize(R.id.continue_bookplate_read_label, TypedValue.COMPLEX_UNIT_SP, 8.5f * metrics.scale)
+                    view.setContentDescription(R.id.continue_bookplate_cover, "Cover of ${copy.title}")
+                    view.setContentDescription(R.id.continue_root, copy.contentDescription)
+                    view.setViewVisibility(R.id.continue_bookplate_progress, if (copy.hasProgress) View.VISIBLE else View.GONE)
+                    if (copy.progress != null) {
+                        val percent = (copy.progress * 100f).roundToInt().coerceIn(0, 100)
+                        view.setImageViewBitmap(R.id.continue_bookplate_ring,
+                            compactBookplateRing(context, copy.progress, metrics))
+                        view.setTextViewText(R.id.continue_bookplate_percent, "$percent%")
+                    }
+                    view.setViewVisibility(R.id.continue_bookplate_count,
+                        if (copy.count != null) View.VISIBLE else View.GONE)
+                    view.setViewVisibility(R.id.continue_bookplate_read_label,
+                        if (copy.count != null) View.VISIBLE else View.GONE)
+                    if (copy.count != null) {
+                        view.setTextViewText(R.id.continue_bookplate_count, copy.count)
+                        view.setTextViewText(R.id.continue_bookplate_read_label, "read")
+                    }
+                    val actionText = when {
+                        story != null -> context.getString(R.string.continue_widget_resume_reading)
+                        locked -> context.getString(R.string.continue_widget_unlock)
+                        else -> context.getString(R.string.continue_widget_open_library)
+                    }
+                    view.setTextViewText(R.id.continue_bookplate_resume_text, actionText)
+                    view.setContentDescription(R.id.continue_bookplate_resume, actionText)
+                    val intent = Intent(context, MainActivity::class.java).setAction(ACTION)
+                        .setData(android.net.Uri.parse("arkhive://continue/$id"))
+                        .putExtra(KEY, story?.key).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    val click = PendingIntent.getActivity(context, id, intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                    view.setOnClickPendingIntent(R.id.continue_root, click)
+                    view.setOnClickPendingIntent(R.id.continue_bookplate_resume, click)
+                    manager.updateAppWidget(id, view)
+                    return@forEach
+                }
                 val background = if (compact) compactBackground(context, bitmap, width, height, scheme.primary.toArgb())
                     else Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { largeBackground -> Canvas(largeBackground).apply {
                     drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 20f, 20f,
@@ -320,8 +434,7 @@ open class ContinueReadingWidget : AppWidgetProvider() {
                 })
                 view.setImageViewBitmap(R.id.continue_arrow_background, arrow)
                 view.setTextColor(R.id.continue_arrow, if (compact) ink else scheme.primary.toArgb())
-                val largeText = context.resources.configuration.fontScale > 1.3f
-                val tightCompact = compact && (width < 145 || height < 140 || largeText)
+                val largeText = fontScale > 1.3f
                 view.setInt(R.id.continue_title, "setMaxLines", if (tightCompact) 1 else if (compact || largeText) 2 else 3)
                 view.setViewVisibility(R.id.continue_label, if (compact) View.GONE else View.VISIBLE)
                 view.setViewVisibility(R.id.continue_author, if (compact || largeText) View.GONE else View.VISIBLE)
