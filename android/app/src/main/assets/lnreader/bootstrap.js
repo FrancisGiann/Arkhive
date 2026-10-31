@@ -33,6 +33,12 @@
     return chunks.join('');
   };
 
+  const urlSearchParamsSource = utf8(await bridge.consumeNamedDataAsArrayBuffer('lr-url-search-params'));
+  (new Function(`'use strict';\n${urlSearchParamsSource}`))();
+  if (typeof globalThis.URLSearchParams !== 'function') {
+    throw new Error('LNReader URLSearchParams compatibility failed to initialize.');
+  }
+
   const helpersSource = utf8(await bridge.consumeNamedDataAsArrayBuffer('lr-helper-bundle'));
   (new Function(`'use strict';\n${helpersSource}`))();
   const helpers = globalThis.__arkhiveLnReaderHelpers;

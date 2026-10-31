@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test:url-search-params": "node test/url-search-params.test.mjs"
+  },
   "dependencies": {
     "buffer": "6.0.3",
     "cheerio": "1.0.0-rc.12",

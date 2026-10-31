@@ -20,6 +20,7 @@ await build({
   define: { 'process.env.NODE_ENV': '"production"' },
 });
 await copyFile(resolve(root, 'bootstrap.js'), resolve(target, 'bootstrap.js'));
+await copyFile(resolve(root, 'src/url-search-params.js'), resolve(target, 'url-search-params.js'));
 
 const lock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'));
 const licenses = resolve(target, 'licenses');

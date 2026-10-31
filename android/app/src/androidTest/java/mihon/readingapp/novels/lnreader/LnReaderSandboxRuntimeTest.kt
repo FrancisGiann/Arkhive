@@ -14,6 +14,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -68,6 +69,53 @@ class LnReaderSandboxRuntimeTest {
         )
         assertEquals("undefined", second.value?.jsonPrimitive?.content)
         assertEquals("2", second.storage["calls"]?.jsonObject?.get("value")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun urlSearchParamsSupportsCatalogSearchDetailAndChapterBridgeRequests() = runBlocking {
+        val fixtureFetch = UrlSearchParamsFixtureFetch()
+        val runtime = LnReaderSandboxRuntime(context, fixtureFetch)
+        val approved = setOf("https://fixture.invalid:443")
+        val bundle = URL_SEARCH_PARAMS_JS.toByteArray()
+
+        val popular = runtime.execute(
+            "fixture-source", "Authored fixture", "https://fixture.invalid/", "1.0", bundle,
+            "popularNovels", listOf(JsonPrimitive(3), Json.parseToJsonElement("""{"filters":{}}""")), approved,
+        ).value!!.jsonObject
+        assertEquals("catalog", popular["stage"]?.jsonPrimitive?.content)
+        assertEquals("undefined/undefined/undefined", popular["isolated"]?.jsonPrimitive?.content)
+
+        val filteredPopular = runtime.execute(
+            "fixture-source", "Authored fixture", "https://fixture.invalid/", "1.0", bundle,
+            "popularNovels", listOf(JsonPrimitive(1), Json.parseToJsonElement("""{"filters":{"genre":{"value":["2","9"]}}}""")), approved,
+        ).value!!.jsonObject
+        assertEquals("search", filteredPopular["stage"]?.jsonPrimitive?.content)
+
+        val search = runtime.execute(
+            "fixture-source", "Authored fixture", "https://fixture.invalid/", "1.0", bundle,
+            "searchNovels", listOf(JsonPrimitive("blue moon")), approved,
+        ).value!!.jsonObject
+        assertEquals("search", search["stage"]?.jsonPrimitive?.content)
+        assertEquals("detail", runtime.execute(
+            "fixture-source", "Authored fixture", "https://fixture.invalid/", "1.0", bundle,
+            "parseNovel", listOf(JsonPrimitive("/story/月")), approved,
+        ).value?.jsonObject?.get("stage")?.jsonPrimitive?.content)
+        assertEquals("Fixture chapter body", runtime.execute(
+            "fixture-source", "Authored fixture", "https://fixture.invalid/", "1.0", bundle,
+            "parseChapter", listOf(JsonPrimitive("/chapter/月")), approved,
+        ).value?.jsonPrimitive?.content)
+
+        assertEquals(5, fixtureFetch.requests.size)
+        assertEquals("https://fixture.invalid/top-novel/3", fixtureFetch.requests[0].url)
+        assertEquals("GET", fixtureFetch.requests[0].method)
+        assertEquals("https://fixture.invalid/detailed-search", fixtureFetch.requests[1].url)
+        assertEquals("POST", fixtureFetch.requests[1].method)
+        assertEquals("include%5Bgenre%5D%5B%5D=2&include%5Bgenre%5D%5B%5D=9&search=1", fixtureFetch.requests[1].body?.toString(Charsets.UTF_8))
+        assertEquals("application/x-www-form-urlencoded", fixtureFetch.requests[1].headers["content-type"])
+        assertEquals("https://fixture.invalid/detailed-search", fixtureFetch.requests[2].url)
+        assertEquals("keyword=blue+moon&search=1", fixtureFetch.requests[2].body?.toString(Charsets.UTF_8))
+        assertEquals("https://fixture.invalid/detail?path=%2Fstory%2F%E6%9C%88", fixtureFetch.requests[3].url)
+        assertEquals("https://fixture.invalid/chapter?path=%2Fchapter%2F%E6%9C%88", fixtureFetch.requests[4].url)
     }
 
     @Test
@@ -352,6 +400,25 @@ class LnReaderSandboxRuntimeTest {
         }
     }
 
+    private class UrlSearchParamsFixtureFetch : LnReaderHostFetch {
+        val requests = mutableListOf<LnReaderHttpRequest>()
+
+        override suspend fun fetch(request: LnReaderHttpRequest, allowedOrigins: Set<String>, maxBytes: Int): LnReaderHttpResponse {
+            assertTrue("The source origin remains explicitly approved.", "https://fixture.invalid:443" in allowedOrigins)
+            assertFalse(request.headers.keys.any { it.equals("cookie", true) || it.equals("authorization", true) })
+            requests += request
+            val body = when {
+                request.url.startsWith("https://fixture.invalid/top-novel/") -> """{"stage":"catalog"}"""
+                request.url == "https://fixture.invalid/detailed-search" -> """{"stage":"search"}"""
+                request.url.startsWith("https://fixture.invalid/detail?") -> """{"stage":"detail"}"""
+                request.url.startsWith("https://fixture.invalid/chapter?") -> "Fixture chapter body"
+                else -> error("Unexpected URLSearchParams fixture request: ${request.url}")
+            }.toByteArray(Charsets.UTF_8)
+            assertTrue(body.size <= maxBytes)
+            return LnReaderHttpResponse(request.url, 200, "OK", emptyMap(), body)
+        }
+    }
+
     private companion object {
         // The latter two rows mirror current official manifest metadata URL edge cases. They are
         // listed with a compatibility reason; neither HTTP nor malformed origins are upgraded.
@@ -394,6 +461,45 @@ class LnReaderSandboxRuntimeTest {
                 storage.set('calls', (storage.get('calls') || 0) + 1, Date.now() + 60000);
                 return typeof globalThis.marker;
               },
+            };
+        """.trimIndent()
+
+        val URL_SEARCH_PARAMS_JS = """
+            const { fetchApi } = require('@libs/fetch');
+            module.exports.default = {
+              id: 'fixture-source', name: 'Authored fixture', site: 'https://fixture.invalid/', version: '1.0',
+              async popularNovels(pageNo, options) {
+                const form = new URLSearchParams();
+                const filters = options.filters;
+                for (const key of Object.keys(filters)) {
+                  const value = filters[key].value;
+                  if (Array.isArray(value)) for (const item of value) form.append("include[" + key + "][]", item);
+                  else if (value) form.append("include[" + key + "][]", value);
+                }
+                if (form.toString()) { form.append('search', '1'); return this.detailedSearch(form); }
+                const response = await fetchApi('https://fixture.invalid/top-novel/' + pageNo);
+                return {stage: (await response.json()).stage,
+                  isolated: [typeof URL, typeof fetch, typeof globalThis.android].join('/')};
+              },
+              async searchNovels(term) {
+                const form = new URLSearchParams();
+                form.append('keyword', term); form.append('search', '1');
+                return this.detailedSearch(form);
+              },
+              async detailedSearch(form) {
+                const response = await fetchApi('https://fixture.invalid/detailed-search', {
+                  method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: form.toString()
+                });
+                return response.json();
+              },
+              async parseNovel(path) {
+                const params = new URLSearchParams({path});
+                return (await fetchApi('https://fixture.invalid/detail?' + params)).json();
+              },
+              async parseChapter(path) {
+                const params = new URLSearchParams(); params.set('path', path);
+                return (await fetchApi('https://fixture.invalid/chapter?' + params.toString())).text();
+              }
             };
         """.trimIndent()
 
