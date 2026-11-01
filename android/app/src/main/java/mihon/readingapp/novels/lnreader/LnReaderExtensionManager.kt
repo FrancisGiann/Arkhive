@@ -166,7 +166,7 @@ class LnReaderExtensionManager(
             check(state.repositories[repo]?.metadata?.singleOrNull { it.id == pluginId } == metadata) {
                 "Repository metadata changed while the bundle was being staged. Refresh and review again."
             }
-            state.installed[sourceId]?.sha256
+            state.installed[sourceId]
         }
         val origins = linkedSetOf(bundleUrl.originKey(), parsePublicHttps(metadata.site).originKey())
         metadata.iconUrl?.let { origins += parsePublicHttps(it).originKey() }
@@ -179,8 +179,14 @@ class LnReaderExtensionManager(
                 "Too many plugin bundles are awaiting review. Finish or restart a review first."
             }
             val token = UUID.randomUUID().toString()
-            staged[token] = StagedBundle(repo, metadata, sourceId, response.body, hash, origins, prior)
-            LnReaderInstallReview(token, metadata, sourceId, hash, response.body.size, origins, prior)
+            staged[token] = StagedBundle(
+                repo, metadata, sourceId, response.body, hash, origins,
+                prior?.sha256, prior?.approvedOrigins.orEmpty(), prior?.installedAt, prior?.enabled,
+            )
+            LnReaderInstallReview(
+                token, metadata, sourceId, hash, response.body.size, origins, prior?.sha256,
+                prior?.approvedOrigins.orEmpty(), prior?.installedAt, prior?.enabled,
+            )
         }
     }
 
@@ -193,11 +199,18 @@ class LnReaderExtensionManager(
             ensureLoaded()
             val review = staged.remove(reviewToken) ?: error("This plugin review expired. Stage the bundle again.")
             require(confirmedSha256.equals(review.sha256, ignoreCase = true)) { "The reviewed bundle hash does not match." }
+            val current = state.installed[review.sourceId]
+            check(
+                current?.sha256 == review.existingSha256 &&
+                    current?.approvedOrigins.orEmpty() == review.existingApprovedOrigins &&
+                    current?.installedAt == review.existingInstalledAt &&
+                    current?.enabled == review.existingEnabled,
+            ) { "The installed source or its approved origins changed during review. Stage the bundle and review origins again." }
             val normalizedApprovals = approvedOrigins.map { parseOrigin(it) }.toSet()
             require(review.requiredOrigins.all { it in normalizedApprovals }) {
                 "Confirm every required public source origin shown in the review before installing."
             }
-            require(normalizedApprovals.size <= MAX_APPROVED_ORIGINS) { "The approved origin limit has been reached." }
+            require(normalizedApprovals.size <= LN_READER_MAX_APPROVED_ORIGINS) { "The approved origin limit has been reached." }
             require(!review.metadata.customJs && !review.metadata.customCss && !review.metadata.webStorageUtilized) {
                 "This plugin requests a capability that is unsupported by the isolated runtime."
             }
@@ -634,6 +647,9 @@ class LnReaderExtensionManager(
         val sha256: String,
         val requiredOrigins: Set<String>,
         val existingSha256: String?,
+        val existingApprovedOrigins: Set<String>,
+        val existingInstalledAt: Long?,
+        val existingEnabled: Boolean?,
     )
 
     private data class State(
@@ -651,7 +667,6 @@ class LnReaderExtensionManager(
         const val MAX_BUNDLE_BYTES = 2_000_000
         const val MAX_STORAGE_BYTES = 64 * 1024
         const val MAX_STATE_BYTES = 8_000_000
-        const val MAX_APPROVED_ORIGINS = 24
         const val MAX_STAGED_PLUGINS = 4
         const val MAX_STAGED_BYTES = 8_000_000
         const val MAX_COVER_BYTES = 512 * 1024

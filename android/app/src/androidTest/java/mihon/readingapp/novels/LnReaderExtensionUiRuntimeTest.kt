@@ -209,6 +209,25 @@ class LnReaderExtensionUiRuntimeTest {
             waitFor("The cover loads after returning to its updated source") {
                 transport.coverRequests.get() > 0 && !device.hasObject(By.textContains("This cover needs the exact origin https://images.fixture.invalid:443"))
             }
+            scenario.onActivity { requireNotNull(testNavigator.get()).push(NovelExtensionsScreen()) }
+            scrollUntilVisible("Review update")
+            click("Review update")
+            waitFor("A previously approved CDN origin is visible and selected by default") {
+                device.hasObject(By.text("Keep images.fixture.invalid:443"))
+            }
+            val retainedCdnChip = requireNotNull(
+                requireNotNull(device.findObject(By.text("Keep images.fixture.invalid:443"))).parent,
+            )
+            assertTrue("The prior CDN grant is retained unless explicitly unchecked.", retainedCdnChip.isChecked)
+            retainedCdnChip.click()
+            assertFalse("The user can intentionally revoke an existing CDN grant.", retainedCdnChip.isChecked)
+            scrollUntilVisible("Trust and update", startYPercent = 75)
+            click("Trust and update")
+            waitFor("The update review closes after revoking the selected CDN") { device.hasObject(By.text("Done")) }
+            assertFalse(
+                "Unchecking an existing grant removes it from the source trust set.",
+                "https://images.fixture.invalid:443" in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins,
+            )
         } catch (failure: Throwable) {
             runCatching {
                 val diagnostics = File(context.cacheDir, "lnreader-ui-failure-$suffix").apply { mkdirs() }

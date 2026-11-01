@@ -117,7 +117,12 @@ class LnReaderNovelSource internal constructor(
         val info = describe()
         val result = manager.execute(id, "parseNovel", listOf(JsonPrimitive(path)))
         val root = result.value?.jsonObject ?: error("The extension returned an invalid novel detail.")
-        val chapters = parseChapters(root["chapters"]?.jsonArray ?: JsonArray(emptyList()))
+        val rootChapters = root["chapters"]?.jsonArray ?: JsonArray(emptyList())
+        var chapterMetadataBytes = encodedSize(rootChapters)
+        require(chapterMetadataBytes <= MAX_CHAPTER_METADATA_BYTES) {
+            "The extension returned more chapter metadata than this source can safely load."
+        }
+        val chapters = parseChapters(rootChapters)
         val totalPagesValue = root["totalPages"]
         val totalPages = if (totalPagesValue == null || totalPagesValue == JsonNull) 1
             else totalPagesValue.jsonPrimitive.takeUnless { it.isString }?.intOrNull
@@ -129,6 +134,10 @@ class LnReaderNovelSource internal constructor(
                 val page = manager.execute(id, "parsePage", listOf(JsonPrimitive(path), JsonPrimitive(number.toString())))
                 val pageChapters = page.value?.jsonObject?.get("chapters")?.jsonArray
                     ?: error("Unsupported chapter pagination: parsePage did not return a chapter list for numeric page $number.")
+                chapterMetadataBytes += encodedSize(pageChapters)
+                require(chapterMetadataBytes <= MAX_CHAPTER_METADATA_BYTES) {
+                    "The extension's chapter list exceeds the supported metadata size. Narrow the source list or contact its maintainers."
+                }
                 val knownPaths = chapters.mapTo(hashSetOf()) { it.path }
                 val next = parseChapters(pageChapters)
                 val novelCount = next.count { it.path !in knownPaths }
@@ -136,13 +145,13 @@ class LnReaderNovelSource internal constructor(
                     "Unsupported chapter pagination: numeric page $number repeated chapter paths or returned no chapters before the declared final page."
                 }
                 chapters += next
-                require(chapters.size <= MAX_CHAPTERS) { "This novel has too many chapters." }
+                require(chapters.size <= MAX_CHAPTERS) { "This novel has more than $MAX_CHAPTERS chapters and cannot be loaded safely." }
             }
         }
         val unique = linkedMapOf<String, NovelChapter>()
         chapters.forEach { chapter -> unique.putIfAbsent(chapter.path, chapter) }
         require(unique.isNotEmpty()) { "The extension did not return any chapters." }
-        require(unique.size <= MAX_CHAPTERS) { "This novel has too many chapters." }
+        require(unique.size <= MAX_CHAPTERS) { "This novel has more than $MAX_CHAPTERS chapters and cannot be loaded safely." }
         val provenance = resolveUrl(path, true, info)
         val genres = root["genres"]?.jsonPrimitive?.contentOrNull.orEmpty()
             .split(',', '|').map(String::trim).filter(String::isNotEmpty).take(24)
@@ -302,6 +311,8 @@ class LnReaderNovelSource internal constructor(
         }.toMutableList()
     }
 
+    private fun encodedSize(value: JsonElement): Int = value.toString().toByteArray(Charsets.UTF_8).size
+
     private fun validatePath(path: String) { require(validPath(path)) { "The extension returned an invalid source path." } }
 
     private fun validPath(path: String) = path.isNotBlank() && path.length <= 4096 && path.none { it.code < 32 }
@@ -309,10 +320,11 @@ class LnReaderNovelSource internal constructor(
     private companion object {
         const val MAX_CATALOG_PAGES = 40
         const val MAX_CHAPTER_PAGES = 40
-        const val MAX_CHAPTERS_PER_PAGE = 300
+        const val MAX_CHAPTERS_PER_PAGE = 20_000
+        const val MAX_CHAPTER_METADATA_BYTES = 8_000_000
         const val MAX_FILTERS = 64
         const val MAX_FILTER_OPTIONS = 60
-        const val MAX_CHAPTERS = 5000
+        const val MAX_CHAPTERS = 20_000
         val SUPPORTED_FILTERS = setOf("Text", "Picker", "Checkbox", "Switch", "XCheckbox")
     }
 }

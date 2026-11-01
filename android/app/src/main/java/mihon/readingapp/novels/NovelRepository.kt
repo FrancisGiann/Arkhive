@@ -100,6 +100,8 @@ class NovelRepository internal constructor(private val context: Context, val sou
     companion object {
         const val WORK_NAME = "arkhive-novel-downloads"
         const val SAVED_LIMIT = 1024L * 1024 * 1024
+        private const val MAX_CHAPTERS_PER_NOVEL = 20_000
+        private const val MAX_MANUAL_QUEUE_CHAPTERS = 5_000
         private const val TEXT_PRELOAD_TIMEOUT_MS = 4_000L
         /** Read by eager constructor startup before instance initialization has necessarily finished. */
         private const val NOVEL_QUERY = "SELECT n.*,COUNT(c.id) AS chapter_count,SUM(CASE WHEN c.progress>=0.999 THEN 1 ELSE 0 END) AS read_count,SUM(CASE WHEN c.saved=1 THEN 1 ELSE 0 END) AS saved_count,AVG(c.progress) AS whole_progress,(SELECT progress FROM novel_chapters WHERE id=n.last_chapter) AS current_progress FROM novels n LEFT JOIN novel_chapters c ON c.novel_id=n.id AND c.active=1"
@@ -123,8 +125,8 @@ class NovelRepository internal constructor(private val context: Context, val sou
         ready.await()
         val detail = sources.get(sourceId).detail(path)
         currentCoroutineContext().ensureActive()
-        require(detail.path == path && detail.name.isNotBlank() && detail.name.length <= 500 && detail.chapters.size in 1..5000)
-        require(detail.chapters.all { it.path.isNotBlank() && it.path.length <= 500 && it.name.length <= 500 })
+        require(detail.path == path && detail.name.isNotBlank() && detail.name.length <= 500 && detail.chapters.size in 1..MAX_CHAPTERS_PER_NOVEL)
+        require(detail.chapters.all { it.path.isNotBlank() && it.path.length <= 4096 && it.name.length <= 500 })
         require(detail.chapters.map { it.path }.distinct().size == detail.chapters.size) { "The source repeated chapter paths." }
         val key = novelId(sourceId, path)
         lock.withLock {
@@ -206,7 +208,7 @@ class NovelRepository internal constructor(private val context: Context, val sou
         try {
             if(replace) db.execSQL("UPDATE novels SET favorite=0")
             entries.forEach {entry->
-                require(entry.detail.path.isNotBlank() && entry.detail.name.length in 1..500 && entry.chapters.size<=5000)
+                require(entry.detail.path.isNotBlank() && entry.detail.name.length in 1..500 && entry.chapters.size<=MAX_CHAPTERS_PER_NOVEL)
                 require(entry.chapters.map {it.path}.distinct().size==entry.chapters.size)
                 val key=novelId(entry.sourceId,entry.detail.path);val old=novelLocked(key)
                 val row=ContentValues().apply {put("id",key);put("source",entry.sourceId);put("path",entry.detail.path);put("name",entry.detail.name)
@@ -360,10 +362,11 @@ class NovelRepository internal constructor(private val context: Context, val sou
         ready.await()
         val count = withContext(Dispatchers.IO) { lock.withLock {
             requireNotNull(novelLocked(novel))
+            require(chapters.size <= MAX_MANUAL_QUEUE_CHAPTERS) { "Save chapters in batches of $MAX_MANUAL_QUEUE_CHAPTERS or fewer." }
             var added = 0
             db.beginTransaction()
             try {
-                for (key in chapters.distinct().take(5000)) {
+                for (key in chapters.distinct()) {
                     val chapter = chapterLocked(key) ?: continue
                     if (chapter.novelId != novel || chapter.downloaded) continue
                     val values = ContentValues().apply { put("id", key); put("state", "queued"); put("attempts", 0); put("token", UUID.randomUUID().toString()); put("added", System.currentTimeMillis()) }

@@ -105,7 +105,7 @@ class LnReaderSandboxRuntime(
         require(pluginId.matches(Regex("[A-Za-z0-9._-]{1,100}"))) { "The plugin identity is invalid." }
         require(operation in SUPPORTED_OPERATIONS) { "Unsupported LNReader operation: $operation" }
         require(bundle.isNotEmpty() && bundle.size <= MAX_BUNDLE_BYTES) { "The plugin bundle is empty or exceeds its 2 MiB limit." }
-        require(approvedOrigins.isNotEmpty() && approvedOrigins.size <= MAX_APPROVED_ORIGINS) { "The approved source origin list is invalid." }
+        require(approvedOrigins.isNotEmpty() && approvedOrigins.size <= LN_READER_MAX_APPROVED_ORIGINS) { "The approved source origin list is invalid." }
         require(!webStorageUtilized) { "Unsupported capability: this source requires browser Web Storage capture." }
         require(storageJsonSize(storage) <= MAX_STORAGE_BYTES) { "Plugin storage exceeds its 64 KiB limit." }
         require(userAgent.length in 1..256 && userAgent.none { it == '\r' || it == '\n' }) { "The source User-Agent is invalid." }
@@ -284,7 +284,6 @@ class LnReaderSandboxRuntime(
         const val MAX_BUNDLE_BYTES = 2_000_000
         const val MAX_HTTP_BODY_BYTES = 2_000_000
         const val MAX_STORAGE_BYTES = 64 * 1024
-        const val MAX_APPROVED_ORIGINS = 24
         const val MAX_REQUESTS_PER_OPERATION = 24
         const val MAX_TOTAL_REQUEST_BYTES = 768 * 1024
         const val MAX_TOTAL_REQUEST_BODY_BYTES = 256 * 1024

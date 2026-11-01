@@ -63,6 +63,7 @@ class NovelExtensionsScreen(
     var search by rememberSaveable { mutableStateOf("") }
     var review by remember { mutableStateOf<LnReaderInstallReview?>(null) }
     var extraOrigins by rememberSaveable { mutableStateOf("") }
+    var selectedExistingOrigins by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedSuggestedOrigins by remember { mutableStateOf<Set<String>>(emptySet()) }
     val safeSuggestedCoverOrigin = remember(suggestedCoverOrigin) {
         suggestedCoverOrigin?.let { runCatching { normalizePublicHttpsOrigin(it) }.getOrNull() }
@@ -135,6 +136,7 @@ class NovelExtensionsScreen(
                                     runCatching { manager.stagePlugin(repository, metadata.id) }.onSuccess {
                                         review = it
                                         extraOrigins = ""
+                                        selectedExistingOrigins = it.existingApprovedOrigins - it.requiredOrigins
                                         selectedSuggestedOrigins = emptySet()
                                     }.onFailure { error = it.message }
                                 }
@@ -180,6 +182,7 @@ class NovelExtensionsScreen(
                                 runCatching { manager.stagePlugin(repo, metadata.id) }.onSuccess {
                                     review = it
                                     extraOrigins = ""
+                                    selectedExistingOrigins = it.existingApprovedOrigins - it.requiredOrigins
                                     selectedSuggestedOrigins = emptySet()
                                 }.onFailure { error = it.message }
                             }
@@ -204,6 +207,14 @@ class NovelExtensionsScreen(
                 listOfNotNull(safeSuggestedCoverOrigin).filterNot { it in pending.requiredOrigins }
             } else emptyList(),
             selectedSuggestedOrigins = selectedSuggestedOrigins,
+            selectedExistingOrigins = selectedExistingOrigins,
+            onExistingOriginToggle = { origin ->
+                selectedExistingOrigins = if (origin in selectedExistingOrigins) {
+                    selectedExistingOrigins - origin
+                } else {
+                    selectedExistingOrigins + origin
+                }
+            },
             onSuggestedOriginToggle = { origin ->
                 selectedSuggestedOrigins = if (origin in selectedSuggestedOrigins) {
                     selectedSuggestedOrigins - origin
@@ -214,20 +225,25 @@ class NovelExtensionsScreen(
             onDismiss = {
                 val token = pending.reviewToken
                 review = null
+                selectedExistingOrigins = emptySet()
                 selectedSuggestedOrigins = emptySet()
                 scope.launch { manager.discardReview(token) }
             },
             onTrust = {
-                val origins = pending.requiredOrigins + normalizedAdditionalOrigins.getOrThrow() + selectedSuggestedOrigins
+                val origins = pending.requiredOrigins +
+                    pending.existingApprovedOrigins.intersect(selectedExistingOrigins) +
+                    normalizedAdditionalOrigins.getOrThrow() + selectedSuggestedOrigins
                 scope.launch {
                     runCatching { manager.installReviewed(pending.reviewToken, pending.sha256, origins) }
                         .onSuccess {
                             review = null
+                            selectedExistingOrigins = emptySet()
                             selectedSuggestedOrigins = emptySet()
                             error = "${pending.metadata.name} is installed. It can now be opened from novel sources."
                         }
                         .onFailure { failure ->
                             review = null
+                            selectedExistingOrigins = emptySet()
                             selectedSuggestedOrigins = emptySet()
                             runCatching { manager.discardReview(pending.reviewToken) }
                             error = failure.message
@@ -299,10 +315,15 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     additionalOriginError: String?,
     suggestedOrigins: List<String>,
     selectedSuggestedOrigins: Set<String>,
+    selectedExistingOrigins: Set<String>,
+    onExistingOriginToggle: (String) -> Unit,
     onSuggestedOriginToggle: (String) -> Unit,
     onDismiss: () -> Unit,
     onTrust: () -> Unit,
 ) {
+    val chosenOrigins = review.requiredOrigins +
+        review.existingApprovedOrigins.intersect(selectedExistingOrigins) +
+        normalizedAdditionalOrigins.orEmpty() + selectedSuggestedOrigins
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (review.existingSha256 == null) "Review extension bundle" else "Review extension update") },
@@ -314,6 +335,18 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
             if (review.existingSha256 != null) Text("Currently installed SHA-256: ${review.existingSha256}", fontSize = 11.sp)
             Text("Required public HTTPS origins", style = MaterialTheme.typography.titleSmall)
             review.requiredOrigins.sorted().forEach { Text("• $it", fontSize = 12.sp) }
+            val retainedExistingOrigins = review.existingApprovedOrigins - review.requiredOrigins
+            if (retainedExistingOrigins.isNotEmpty()) {
+                Text("Previously approved origins", style = MaterialTheme.typography.titleSmall)
+                retainedExistingOrigins.sorted().forEach { origin ->
+                    FilterChip(
+                        selected = origin in selectedExistingOrigins,
+                        onClick = { onExistingOriginToggle(origin) },
+                        label = { Text("Keep ${origin.removePrefix("https://")}") },
+                    )
+                }
+                Text("Existing approvals stay selected unless you turn one off.", fontSize = 11.sp)
+            }
             if (suggestedOrigins.isNotEmpty()) {
                 Text("Observed blocked source origin", style = MaterialTheme.typography.titleSmall)
                 suggestedOrigins.forEach { origin ->
@@ -334,9 +367,17 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
                 Text("Will add these exact origins:", style = MaterialTheme.typography.titleSmall)
                 normalizedAdditionalOrigins.sorted().forEach { Text("• $it", fontSize = 12.sp) }
             }
+            if (chosenOrigins.size > mihon.readingapp.novels.lnreader.LN_READER_MAX_APPROVED_ORIGINS) {
+                Text("The combined origin list exceeds the ${mihon.readingapp.novels.lnreader.LN_READER_MAX_APPROVED_ORIGINS}-origin limit.", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+            }
             Text("No extension code ran while listing or staging this bundle. Trusting it allows its code to run only inside the isolated host with these origins.", fontSize = 11.sp)
         } },
-        confirmButton = { TextButton(onClick = onTrust, enabled = normalizedAdditionalOrigins != null) { Text(if (review.existingSha256 == null) "Trust and install" else "Trust and update") } },
+        confirmButton = {
+            TextButton(
+                onClick = onTrust,
+                enabled = normalizedAdditionalOrigins != null && chosenOrigins.size <= mihon.readingapp.novels.lnreader.LN_READER_MAX_APPROVED_ORIGINS,
+            ) { Text(if (review.existingSha256 == null) "Trust and install" else "Trust and update") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

@@ -2,11 +2,11 @@
 
 A cover-led Android reader for manga, manhwa, manhua, online novels, and local EPUB/PDF/text. Arkhive retains Mihon's native image reader and source host, with Readium for reflowable books.
 
-**Current preview: 0.4.18.** This is a universal debug APK, not a production release.
+**Current preview: 0.4.19.** This is a universal debug APK, not a production release.
 
-The 0.4.19 validation build is an unpublished local candidate; the public download links below remain on 0.4.18.
+The 0.4.20 validation build is an unpublished local candidate; the public download links below remain on 0.4.19.
 
-[Download Arkhive-0.4.18.apk](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.18/Arkhive-0.4.18.apk) · [Release notes](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.18) · [SHA-256 file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.18/Arkhive-0.4.18.apk.sha256)
+[Download Arkhive-0.4.19.apk](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.19/Arkhive-0.4.19.apk) · [Release notes](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.19) · [SHA-256 file](https://github.com/FrancisGiann/Arkhive/releases/download/v0.4.19/Arkhive-0.4.19.apk.sha256)
 
 ## Install or update
 
@@ -14,7 +14,7 @@ The 0.4.19 validation build is an unpublished local candidate; the public downlo
 2. Open the APK on Android. If prompted, allow installation from the browser or file manager used for this download.
 3. To update the existing Arkhive preview, install over it. The package and signing certificate are unchanged; keep the existing installation to retain its data.
 
-Internal version: **0.4.18-27**, version code **25**. Package: `dev.francisgiann.readingapp.dev`. The universal APK includes ARM64, ARMv7, x86 and x86_64 libraries. Compare its SHA-256 with the linked checksum asset. Arkhive's manual update checker remains available; enable preview releases to see this preview.
+Internal version: **0.4.19-29**, version code **26**. Package: `dev.francisgiann.readingapp.dev`. The universal APK includes ARM64, ARMv7, x86 and x86_64 libraries. Compare its SHA-256 with the linked checksum asset. Arkhive's manual update checker remains available; enable preview releases to see this preview.
 
 The [0.4.10 preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.10) was withdrawn after a launcher widget loading report. Check each release's notes before changing versions.
 
@@ -28,8 +28,9 @@ The [0.4.10 preview](https://github.com/FrancisGiann/Arkhive/releases/tag/v0.4.1
 
 ## Changes
 
-- 0.4.19 is an unpublished local candidate that adds the full `URL` and `URLSearchParams` APIs to the isolated novel source runtime, keeps source-origin approval explicit, preserves valid large catalog pages, and provides reader/download recovery when a source requests a new origin. Its host fixtures pass, but Android runtime and live source behavior remain unverified. See [candidate notes](RELEASE-NOTES-0.4.19.md).
-- 0.4.18 adds the missing `URLSearchParams` API to the isolated LNReader runtime. Tests include novelsOnline's real parser with simulated responses; live Android/source operation remains unverified and extensions requiring the separate `URL` API remain unsupported. See the [release notes](RELEASE-NOTES-0.4.18.md).
+- 0.4.20 is an unpublished local candidate that builds on the source-runtime compatibility work with retained explicit origin approvals, safe cover retry, and paged/searchable long chapter lists for online novels and manga. It preserves the current public 0.4.19 links; Android runtime and live-source behavior remain unverified. See [candidate notes](RELEASE-NOTES-0.4.20.md).
+- 0.4.19 adds the full `URL` and `URLSearchParams` APIs to the isolated LNReader runtime, preserves source-origin approval, and adds recovery when a source requests another origin. Host fixtures pass, but Android runtime and live-source behavior remain unverified. See the [release notes](RELEASE-NOTES-0.4.19.md).
+- 0.4.18 adds the missing `URLSearchParams` API to the isolated LNReader runtime. Tests include novelsOnline's real parser with simulated responses; live Android/source operation remains unverified. See the [release notes](RELEASE-NOTES-0.4.18.md).
 - 0.4.17 adds the approved larger-cover Bookplate layout to the compact 2×2 widget, retaining other variants and resume behavior. See the [release notes](RELEASE-NOTES-0.4.17.md) for tests and phone-verification limits.
 - 0.4.16 lets the current tiled image viewport progress when an older queued decode is canceled. See the [release notes](RELEASE-NOTES-0.4.16.md) for tests and device-verification limits.
 - 0.4.12 makes the 2×2 Continue Reading cover grow with the card and keeps progress clear of the arrow. The large widget remains available. See the [release notes](RELEASE-NOTES-0.4.12.md) for verification limits.

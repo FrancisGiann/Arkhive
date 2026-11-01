@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.*
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,7 +37,9 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
 import eu.kanade.presentation.util.Screen
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -49,6 +52,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import mihon.app.di.appGraph
 import mihon.readingapp.design.*
+import mihon.readingapp.library.chapterPageWindow
+import mihon.readingapp.library.chapterMatchesSearch
+import mihon.readingapp.library.CHAPTER_LIST_PAGE_SIZE
+import mihon.readingapp.library.ChapterListIdentity
 import mihon.readingapp.settings.ArkhiveSettingsHeader
 import mihon.readingapp.settings.InkSettingsTheme
 import mihon.readingapp.library.AddToShelvesDialog
@@ -176,6 +183,12 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
     var coverOriginSuggestion by remember {mutableStateOf<String?>(null)}
     var sourceOriginSuggestion by remember {mutableStateOf<String?>(null)}
     var coverRetry by remember {mutableIntStateOf(0)}
+    var chapterPage by rememberSaveable(sourceId, path) { mutableIntStateOf(0) }
+    var chapterSearch by rememberSaveable(sourceId, path) { mutableStateOf("") }
+    var chapterNavigationNonce by rememberSaveable(sourceId, path) { mutableIntStateOf(0) }
+    var lastHandledChapterNavigationNonce by remember(sourceId, path) { mutableIntStateOf(chapterNavigationNonce) }
+    var chaptersReady by remember(sourceId, path) { mutableStateOf(false) }
+    val chapterListState = rememberLazyListState()
     var tools by remember { mutableStateOf(false) }
     var synopsis by remember { mutableStateOf(false) }
     var shelfPicker by remember { mutableStateOf(false) }
@@ -187,7 +200,68 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
         val id = NovelRepository.novelId(sourceId, path)
         updates.downloads.filter { it.novelId == id }
     }
-    suspend fun reload() {val id=NovelRepository.novelId(sourceId,path);novel=repository.get(id);chapters=repository.chapters(id)}
+    suspend fun reload() {
+        val id = NovelRepository.novelId(sourceId, path)
+        novel = repository.get(id)
+        chapters = repository.chapters(id)
+        chaptersReady = true
+    }
+    val chapterListIdentity = ChapterListIdentity(chapters)
+    val chapterSearchResult by produceState(
+        initialValue = Triple(
+            chapterListIdentity,
+            if (chapterSearch.isBlank()) chapterSearch else null,
+            if (chapterSearch.isBlank()) chapters else emptyList(),
+        ),
+        chapterListIdentity,
+        chapterSearch,
+    ) {
+        val query = chapterSearch
+        val filtered = withContext(Dispatchers.Default) {
+            if (query.isBlank()) chapters else chapters.filter { chapter ->
+                chapterMatchesSearch(chapter.name, chapter.chapterNumber, query)
+            }
+        }
+        value = Triple(chapterListIdentity, query, filtered)
+    }
+    val chapterSearchReady = chapterSearchResult.first.matches(chapters) && chapterSearchResult.second == chapterSearch
+    val filteredChapters = if (chapterSearchReady) chapterSearchResult.third else emptyList()
+    val chapterWindow = chapterPageWindow(filteredChapters.size, chapterPage)
+    val visibleChapters = remember(filteredChapters, chapterWindow) {
+        filteredChapters.subList(chapterWindow.startIndex, chapterWindow.endIndexExclusive)
+    }
+    val currentChapterIndex = remember(chapters, novel?.lastChapter) {
+        chapters.indexOfFirst { it.id == novel?.lastChapter }.takeIf { it >= 0 }
+    }
+    val nextUnreadChapterIndex = remember(chapters, currentChapterIndex) {
+        val current = currentChapterIndex ?: -1
+        chapters.indices.firstOrNull { it >= current && chapters[it].progression < .999 }
+            ?: chapters.indices.firstOrNull { chapters[it].progression < .999 }
+    }
+    LaunchedEffect(filteredChapters.size, chaptersReady, chapterSearchReady) {
+        if (!chaptersReady || !chapterSearchReady) return@LaunchedEffect
+        val clampedPage = chapterPageWindow(filteredChapters.size, chapterPage).pageIndex
+        if (chapterPage != clampedPage) {
+            chapterPage = clampedPage
+            chapterNavigationNonce++
+        }
+    }
+    LaunchedEffect(chapterNavigationNonce, chaptersReady, chapterSearchReady, chapterWindow.pageCount, coverError) {
+        if (chapterNavigationNonce == lastHandledChapterNavigationNonce || !chaptersReady || !chapterSearchReady) return@LaunchedEffect
+        if (chapterWindow.pageCount == 0) {
+            lastHandledChapterNavigationNonce = chapterNavigationNonce
+            return@LaunchedEffect
+        }
+        if (chapters.isEmpty()) return@LaunchedEffect
+        val firstChapterItem = 3 + if (coverError != null) 1 else 0
+        chapterListState.scrollToItem(firstChapterItem)
+        lastHandledChapterNavigationNonce = chapterNavigationNonce
+    }
+    fun goToChapter(index: Int) {
+        chapterSearch = ""
+        chapterPage = index / CHAPTER_LIST_PAGE_SIZE
+        chapterNavigationNonce++
+    }
     LaunchedEffect(sourceId,path,refresh) {
         busy=true;error=null;sourceOriginSuggestion=null
         try {val id=NovelRepository.novelId(sourceId,path);novel=repository.get(id)
@@ -200,7 +274,10 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
           }
         finally {busy=false}
     }
-    LaunchedEffect(updates) {if(novel!=null) reload()}
+    // Avoid rereading every chapter row and probing saved/cache files for unrelated library
+    // emissions (including another title's queue/progress changes). Refresh only when this
+    // title's download state changes; ON_RESUME remains the explicit cross-screen refresh.
+    LaunchedEffect(titleDownloads) {if(novel!=null) reload()}
     val life=LocalLifecycleOwner.current.lifecycle
     val latestCoverError=rememberUpdatedState(coverError)
     DisposableEffect(life) {
@@ -216,6 +293,7 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
         ArkhiveSettingsHeader("Novel", { nav.pop(); Unit }, hero = true)
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth().background(Ink.Panel),
+            state = chapterListState,
             contentPadding = PaddingValues(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
@@ -290,6 +368,12 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                         ) {
                             Text(message, color = Ink.HeroMuted, fontSize = 12.sp)
                             OutlinedButton(
+                                onClick = { coverRetry++ },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
+                                border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
+                            ) { Text("Retry cover", maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                            OutlinedButton(
                                 onClick = { nav.push(NovelExtensionsScreen(coverOriginSuggestion, sourceId)) },
                                 modifier = Modifier.heightIn(min = 48.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
@@ -350,8 +434,25 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                 }
                 }
             }
+            stickyHeader(key = "chapter-page-controls") {
+                Box(Modifier.fillMaxWidth().background(Ink.HeroSurface).padding(horizontal = 22.dp)) {
+                    ChapterPageControls(
+                        window = chapterWindow,
+                        totalItems = filteredChapters.size,
+                        query = chapterSearch,
+                        onQueryChange = { chapterSearch = it.take(120); chapterPage = 0; chapterNavigationNonce++ },
+                        onPageChange = { chapterPage = it; chapterNavigationNonce++ },
+                        onCurrentPage = currentChapterIndex?.let { index ->
+                            { goToChapter(index) }
+                        },
+                        onNextUnreadPage = nextUnreadChapterIndex?.let { index ->
+                            { goToChapter(index) }
+                        },
+                    )
+                }
+            }
             novel?.let { n ->
-                items(chapters, key = { it.id }) { c ->
+                items(visibleChapters, key = { it.id }) { c ->
                     Box(Modifier.fillMaxWidth().background(Ink.Panel).padding(horizontal = 22.dp, vertical = 5.dp)) {
                         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Ink.Raised).clickable {
                             if (selecting) selected = if (c.id in selected) selected - c.id else selected + c.id

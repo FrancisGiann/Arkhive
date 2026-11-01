@@ -22,6 +22,9 @@ import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
 import eu.kanade.core.preference.asState
 import eu.kanade.core.util.addOrRemove
 import eu.kanade.core.util.insertSeparators
+import mihon.readingapp.library.chapterMatchesSearch
+import mihon.readingapp.library.chapterPageSlice
+import mihon.readingapp.library.ChapterPageWindow
 import eu.kanade.domain.chapter.interactor.GetAvailableScanlators
 import eu.kanade.domain.chapter.interactor.SetReadStatus
 import eu.kanade.domain.manga.interactor.GetExcludedScanlators
@@ -90,7 +93,6 @@ import tachiyomi.domain.chapter.interactor.UpdateChapter
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.model.NoChaptersException
-import tachiyomi.domain.chapter.service.calculateChapterGap
 import tachiyomi.domain.chapter.service.getChapterSort
 import tachiyomi.domain.chapter.service.missingChaptersCount
 import tachiyomi.domain.library.service.LibraryPreferences
@@ -104,7 +106,6 @@ import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.isLocal
-import kotlin.math.floor
 import kotlin.time.Duration.Companion.seconds
 
 @AssistedInject
@@ -287,7 +288,6 @@ class MangaViewModel(
         // Composition would otherwise build these on first read, on the main thread, for every new state
         .onEach {
             it.processedChapters
-            it.chapterListItems
             it.isAnySelected
             it.selectedChapters
             it.hasUnreadChapters
@@ -1139,34 +1139,42 @@ class MangaViewModel(
                 processedChapters.fastMap { it.chapter.chapterNumber }.missingChaptersCount()
             }
 
-            val chapterListItems by lazy {
-                if (hideMissingChapters) {
-                    return@lazy processedChapters
+            fun matchingChapterItems(query: String): List<ChapterList.Item> {
+                return if (query.isBlank()) processedChapters else processedChapters.filter { item ->
+                    chapterMatchesSearch(item.chapter.name, item.chapter.chapterNumber, query)
                 }
+            }
 
-                processedChapters.insertSeparators { before, after ->
-                    val (lowerChapter, higherChapter) = if (manga.sortDescending()) {
-                        after to before
-                    } else {
-                        before to after
-                    }
-                    if (higherChapter == null) return@insertSeparators null
+            fun chapterListItemsForPage(
+                matchingItems: List<ChapterList.Item>,
+                window: ChapterPageWindow,
+                showMissingCounts: Boolean,
+            ): List<ChapterList> {
+                val slice = chapterPageSlice(matchingItems, window)
+                val pageRows = slice.items
+                if (pageRows.isEmpty() || hideMissingChapters || !showMissingCounts) return pageRows
 
-                    if (lowerChapter == null) {
-                        floor(higherChapter.chapter.chapterNumber)
-                            .toInt()
-                            .minus(1)
-                            .coerceAtLeast(0)
+                // Generate separators only for this page. At its first row, consult the prior
+                // filtered/sorted row so paging does not invent or drop a gap at the boundary.
+                return pageRows.insertSeparators { before, after ->
+                    if (after == null && slice.hasMoreAfter) return@insertSeparators null
+                    val adjacentBefore = before ?: if (slice.previousItem != null && after != null) slice.previousItem else null
+                    val missingCount = missingChapterCountBefore(
+                        beforeNumber = adjacentBefore?.chapter?.chapterNumber,
+                        afterNumber = after?.chapter?.chapterNumber,
+                        descending = manga.sortDescending(),
+                        firstPage = slice.window.startIndex == 0,
+                        hasMoreAfter = slice.hasMoreAfter,
+                    ) ?: return@insertSeparators null
+                    val missingId = if (manga.sortDescending()) {
+                        "${after?.id}-${adjacentBefore?.id}"
                     } else {
-                        calculateChapterGap(higherChapter.chapter, lowerChapter.chapter)
+                        "${adjacentBefore?.id}-${after?.id}"
                     }
-                        .takeIf { it > 0 }
-                        ?.let { missingCount ->
-                            ChapterList.MissingCount(
-                                id = "${lowerChapter?.id}-${higherChapter.id}",
-                                count = missingCount,
-                            )
-                        }
+                    ChapterList.MissingCount(
+                        id = missingId,
+                        count = missingCount,
+                    )
                 }
             }
 

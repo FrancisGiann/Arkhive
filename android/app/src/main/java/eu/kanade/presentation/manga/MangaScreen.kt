@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.heightIn
 import mihon.readingapp.design.*
 import mihon.readingapp.navigation.InkNavigation
 import mihon.readingapp.discovery.MangaDiscoveryPolicy
+import mihon.readingapp.library.chapterPageWindow
+import mihon.readingapp.library.CHAPTER_LIST_PAGE_SIZE
+import mihon.readingapp.library.ChapterListIdentity
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.tachiyomi.ui.home.HomeScreen
@@ -52,6 +55,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.LaunchedEffect
 import mihon.app.di.appGraph
@@ -105,6 +109,9 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.shouldExpandFAB
 import tachiyomi.source.local.isLocal
 import kotlin.time.Instant
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 
 @Composable
 fun MangaScreen(
@@ -298,13 +305,61 @@ private fun MangaScreenSmallImpl(
     val sourceContext=LocalContext.current
     var synopsis by rememberSaveable(state.manga.id) {mutableStateOf(false)}
     var shelfPicker by rememberSaveable(state.manga.id) {mutableStateOf(false)}
-
-    val (chapters, listItem, isAnySelected) = remember(state) {
-        Triple(
-            first = state.processedChapters,
-            second = state.chapterListItems,
-            third = state.isAnySelected,
+    var chapterPage by rememberSaveable(state.manga.id) { mutableIntStateOf(0) }
+    var chapterSearch by rememberSaveable(state.manga.id) { mutableStateOf("") }
+    var chapterNavigationNonce by rememberSaveable(state.manga.id) { mutableIntStateOf(0) }
+    var lastHandledChapterNavigationNonce by remember(state.manga.id) { mutableIntStateOf(chapterNavigationNonce) }
+    val chapters = state.processedChapters
+    val chapterListIdentity = ChapterListIdentity(chapters)
+    val chapterSearchResult by produceState(
+        initialValue = Triple(
+            chapterListIdentity,
+            if (chapterSearch.isBlank()) chapterSearch else null,
+            if (chapterSearch.isBlank()) chapters else emptyList(),
+        ),
+        chapterListIdentity,
+        chapterSearch,
+    ) {
+        val query = chapterSearch
+        val matched = withContext(Dispatchers.Default) { state.matchingChapterItems(query) }
+        value = Triple(chapterListIdentity, query, matched)
+    }
+    val chapterSearchReady = chapterSearchResult.first.matches(chapters) && chapterSearchResult.second == chapterSearch
+    val matchingChapters = if (chapterSearchReady) chapterSearchResult.third else emptyList()
+    val chapterWindow = chapterPageWindow(matchingChapters.size, chapterPage)
+    val listItem = remember(state, matchingChapters, chapterWindow, chapterSearch) {
+        state.chapterListItemsForPage(
+            matchingChapters,
+            chapterWindow,
+            showMissingCounts = chapterSearch.isBlank(),
         )
+    }
+    val isAnySelected = state.isAnySelected
+    val currentChapterIndex = remember(chapters) { chapters.indexOfFirst { !it.chapter.read && it.chapter.lastPageRead > 0 }.takeIf { it >= 0 } }
+    val nextUnreadChapterIndex = remember(chapters) { chapters.indexOfFirst { !it.chapter.read }.takeIf { it >= 0 } }
+    LaunchedEffect(matchingChapters.size, chapterSearchReady) {
+        if (chapterSearchReady) {
+            val clampedPage = chapterPageWindow(matchingChapters.size, chapterPage).pageIndex
+            if (chapterPage != clampedPage) {
+                chapterPage = clampedPage
+                chapterNavigationNonce++
+            }
+        }
+    }
+    LaunchedEffect(chapterNavigationNonce, chapterSearchReady, chapterWindow.pageCount) {
+        if (chapterNavigationNonce == lastHandledChapterNavigationNonce || !chapterSearchReady) return@LaunchedEffect
+        if (chapterWindow.pageCount == 0) {
+            lastHandledChapterNavigationNonce = chapterNavigationNonce
+            return@LaunchedEffect
+        }
+        val firstChapterItem = 5 + if (listItem.firstOrNull() is ChapterList.MissingCount) 1 else 0
+        chapterListState.scrollToItem(firstChapterItem)
+        lastHandledChapterNavigationNonce = chapterNavigationNonce
+    }
+    fun goToChapter(index: Int) {
+        chapterSearch = ""
+        chapterPage = index / CHAPTER_LIST_PAGE_SIZE
+        chapterNavigationNonce++
     }
 
     BackHandler(enabled = isAnySelected) {
@@ -447,6 +502,20 @@ private fun MangaScreenSmallImpl(
                         }
                     }
 
+                    stickyHeader(key = "chapter_page_controls") {
+                        Box(Modifier.fillMaxWidth().background(Ink.Panel).padding(horizontal = 16.dp)) {
+                            ChapterPageControls(
+                                window = chapterWindow,
+                                totalItems = matchingChapters.size,
+                                query = chapterSearch,
+                                onQueryChange = { chapterSearch = it.take(120); chapterPage = 0; chapterNavigationNonce++ },
+                                onPageChange = { chapterPage = it; chapterNavigationNonce++ },
+                                onCurrentPage = currentChapterIndex?.let { index -> { goToChapter(index) } },
+                                onNextUnreadPage = nextUnreadChapterIndex?.let { index -> { goToChapter(index) } },
+                            )
+                        }
+                    }
+
                     sharedChapterItems(
                         manga = state.manga,
                         chapters = listItem,
@@ -456,7 +525,9 @@ private fun MangaScreenSmallImpl(
                         onChapterClicked = onChapterClicked,
                         onDownloadChapter = onDownloadChapter,
                         downloadProgressProvider = downloadProgressProvider,
-                        onChapterSelected = onChapterSelected,
+                        onChapterSelected = { item, selected, range ->
+                            onChapterSelected(item, selected, range && chapterSearch.isBlank())
+                        },
                         onChapterSwipe = onChapterSwipe,
                     )
                 }
@@ -541,18 +612,66 @@ fun MangaScreenLargeImpl(
     val layoutDirection = LocalLayoutDirection.current
     val density = LocalDensity.current
 
-    val (chapters, listItem, isAnySelected) = remember(state) {
-        Triple(
-            first = state.processedChapters,
-            second = state.chapterListItems,
-            third = state.isAnySelected,
-        )
-    }
-
     val insetPadding = WindowInsets.systemBars.only(WindowInsetsSides.Horizontal).asPaddingValues()
     var topBarHeight by remember { mutableIntStateOf(0) }
 
     val chapterListState = rememberLazyListState()
+    var chapterPage by rememberSaveable(state.manga.id) { mutableIntStateOf(0) }
+    var chapterSearch by rememberSaveable(state.manga.id) { mutableStateOf("") }
+    var chapterNavigationNonce by rememberSaveable(state.manga.id) { mutableIntStateOf(0) }
+    var lastHandledChapterNavigationNonce by remember(state.manga.id) { mutableIntStateOf(chapterNavigationNonce) }
+    val chapters = state.processedChapters
+    val chapterListIdentity = ChapterListIdentity(chapters)
+    val chapterSearchResult by produceState(
+        initialValue = Triple(
+            chapterListIdentity,
+            if (chapterSearch.isBlank()) chapterSearch else null,
+            if (chapterSearch.isBlank()) chapters else emptyList(),
+        ),
+        chapterListIdentity,
+        chapterSearch,
+    ) {
+        val query = chapterSearch
+        val matched = withContext(Dispatchers.Default) { state.matchingChapterItems(query) }
+        value = Triple(chapterListIdentity, query, matched)
+    }
+    val chapterSearchReady = chapterSearchResult.first.matches(chapters) && chapterSearchResult.second == chapterSearch
+    val matchingChapters = if (chapterSearchReady) chapterSearchResult.third else emptyList()
+    val chapterWindow = chapterPageWindow(matchingChapters.size, chapterPage)
+    val listItem = remember(state, matchingChapters, chapterWindow, chapterSearch) {
+        state.chapterListItemsForPage(
+            matchingChapters,
+            chapterWindow,
+            showMissingCounts = chapterSearch.isBlank(),
+        )
+    }
+    val isAnySelected = state.isAnySelected
+    val currentChapterIndex = remember(chapters) { chapters.indexOfFirst { !it.chapter.read && it.chapter.lastPageRead > 0 }.takeIf { it >= 0 } }
+    val nextUnreadChapterIndex = remember(chapters) { chapters.indexOfFirst { !it.chapter.read }.takeIf { it >= 0 } }
+    LaunchedEffect(matchingChapters.size, chapterSearchReady) {
+        if (chapterSearchReady) {
+            val clampedPage = chapterPageWindow(matchingChapters.size, chapterPage).pageIndex
+            if (chapterPage != clampedPage) {
+                chapterPage = clampedPage
+                chapterNavigationNonce++
+            }
+        }
+    }
+    LaunchedEffect(chapterNavigationNonce, chapterSearchReady, chapterWindow.pageCount) {
+        if (chapterNavigationNonce == lastHandledChapterNavigationNonce || !chapterSearchReady) return@LaunchedEffect
+        if (chapterWindow.pageCount == 0) {
+            lastHandledChapterNavigationNonce = chapterNavigationNonce
+            return@LaunchedEffect
+        }
+        val firstChapterItem = 2 + if (listItem.firstOrNull() is ChapterList.MissingCount) 1 else 0
+        chapterListState.scrollToItem(firstChapterItem)
+        lastHandledChapterNavigationNonce = chapterNavigationNonce
+    }
+    fun goToChapter(index: Int) {
+        chapterSearch = ""
+        chapterPage = index / CHAPTER_LIST_PAGE_SIZE
+        chapterNavigationNonce++
+    }
     val sourceContext = LocalContext.current
     var synopsis by rememberSaveable(state.manga.id) { mutableStateOf(false) }
     var shelfPicker by rememberSaveable(state.manga.id) { mutableStateOf(false) }
@@ -692,6 +811,20 @@ fun MangaScreenLargeImpl(
                                 )
                             }
 
+                            stickyHeader(key = "chapter_page_controls") {
+                                Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp)) {
+                                    ChapterPageControls(
+                                        window = chapterWindow,
+                                        totalItems = matchingChapters.size,
+                                        query = chapterSearch,
+                                        onQueryChange = { chapterSearch = it.take(120); chapterPage = 0; chapterNavigationNonce++ },
+                                        onPageChange = { chapterPage = it; chapterNavigationNonce++ },
+                                        onCurrentPage = currentChapterIndex?.let { index -> { goToChapter(index) } },
+                                        onNextUnreadPage = nextUnreadChapterIndex?.let { index -> { goToChapter(index) } },
+                                    )
+                                }
+                            }
+
                             sharedChapterItems(
                                 manga = state.manga,
                                 chapters = listItem,
@@ -701,7 +834,9 @@ fun MangaScreenLargeImpl(
                                 onChapterClicked = onChapterClicked,
                                 onDownloadChapter = onDownloadChapter,
                                 downloadProgressProvider = downloadProgressProvider,
-                                onChapterSelected = onChapterSelected,
+                                onChapterSelected = { item, selected, range ->
+                                    onChapterSelected(item, selected, range && chapterSearch.isBlank())
+                                },
                                 onChapterSwipe = onChapterSwipe,
                             )
                         }

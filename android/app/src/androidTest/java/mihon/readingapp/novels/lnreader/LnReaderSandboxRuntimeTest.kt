@@ -297,6 +297,35 @@ class LnReaderSandboxRuntimeTest {
         val catalogCall = manager.execute(installed.sourceId, "searchNovels", listOf(JsonPrimitive("spring"), JsonPrimitive(1)))
         assertEquals("Authored Novel", catalogCall.value?.jsonObject?.get("title")?.jsonPrimitive?.content)
 
+        // Adding an image/API grant during a later review retains prior consent only when it is
+        // explicitly included in the staged grant list; a subsequent review can revoke it.
+        val cdnOrigin = "https://cdn.fixture.invalid:443"
+        val addCdnReview = manager.stagePlugin(repo, "fixture-source")
+        assertEquals(installed.approvedOrigins, addCdnReview.existingApprovedOrigins)
+        manager.installReviewed(
+            addCdnReview.reviewToken,
+            addCdnReview.sha256,
+            addCdnReview.requiredOrigins + cdnOrigin,
+        )
+        val retainCdnReview = manager.stagePlugin(repo, "fixture-source")
+        assertTrue(cdnOrigin in retainCdnReview.existingApprovedOrigins)
+        val retained = manager.installReviewed(
+            retainCdnReview.reviewToken,
+            retainCdnReview.sha256,
+            retainCdnReview.requiredOrigins + retainCdnReview.existingApprovedOrigins,
+        )
+        assertTrue(cdnOrigin in retained.approvedOrigins)
+        val revokeCdnReview = manager.stagePlugin(repo, "fixture-source")
+        val revoked = manager.installReviewed(revokeCdnReview.reviewToken, revokeCdnReview.sha256, revokeCdnReview.requiredOrigins)
+        assertFalse(cdnOrigin in revoked.approvedOrigins)
+        val staleEnabledState = manager.stagePlugin(repo, "fixture-source")
+        manager.setEnabled(installed.sourceId, false)
+        val staleReviewFailure = runCatching {
+            manager.installReviewed(staleEnabledState.reviewToken, staleEnabledState.sha256, staleEnabledState.requiredOrigins)
+        }.exceptionOrNull()
+        assertTrue(staleReviewFailure?.message.orEmpty().contains("changed during review"))
+        manager.setEnabled(installed.sourceId, true)
+
         // A same-version bundle hash change must invalidate the old trust confirmation.
         fixtureFetch.currentBundle = COMMON_JS.replace("Authored Novel", "Updated Novel").toByteArray()
         manager.refreshRepository(repo)

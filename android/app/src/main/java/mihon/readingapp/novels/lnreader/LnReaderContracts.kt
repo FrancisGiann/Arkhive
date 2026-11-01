@@ -2,6 +2,8 @@ package mihon.readingapp.novels.lnreader
 
 import kotlinx.serialization.json.JsonElement
 
+const val LN_READER_MAX_APPROVED_ORIGINS = 24
+
 /** Public repository metadata. The external id is preserved exactly as published by LNReader. */
 data class LnReaderPluginMetadata(
     val id: String,
@@ -43,6 +45,10 @@ data class LnReaderInstallReview(
     val bundleSize: Int,
     val requiredOrigins: Set<String>,
     val existingSha256: String? = null,
+    /** Previously approved origins are shown as checked, revocable grants during update review. */
+    val existingApprovedOrigins: Set<String> = emptySet(),
+    val existingInstalledAt: Long? = null,
+    val existingEnabled: Boolean? = null,
 )
 
 data class LnReaderRuntimeSupport(val supported: Boolean, val missingFeatures: List<String>, val reason: String? = null)

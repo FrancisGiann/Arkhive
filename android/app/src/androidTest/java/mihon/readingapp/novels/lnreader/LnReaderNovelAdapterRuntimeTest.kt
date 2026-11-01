@@ -21,6 +21,8 @@ import mihon.app.di.appGraph
 import mihon.readingapp.novels.LnReaderNovelSource
 import mihon.readingapp.novels.NovelRepository
 import mihon.readingapp.novels.NovelSources
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedCoverOriginException
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -83,6 +85,15 @@ class LnReaderNovelAdapterRuntimeTest {
                 "type[]" to JsonArray(listOf(JsonPrimitive("web-novel"))),
             ))
 
+            val apiOrigin = "https://api.fixture.invalid:443"
+            val cdnOrigin = "https://cdn.fixture.invalid:443"
+            val blockedCatalog = runCatching { source.catalog(1, "") }.exceptionOrNull()
+            assertTrue("The source API stays blocked until a separate origin review.", blockedCatalog is LnReaderUnapprovedSourceOriginException)
+            assertEquals(apiOrigin, (blockedCatalog as LnReaderUnapprovedSourceOriginException).origin)
+            val apiReview = manager.stagePlugin(repositoryUrl, "fixture-adapter")
+            assertTrue(installed.approvedOrigins.containsAll(apiReview.existingApprovedOrigins))
+            manager.installReviewed(apiReview.reviewToken, apiReview.sha256, apiReview.requiredOrigins + apiOrigin)
+
             val catalog = source.catalog(1, "")
             assertEquals(500, catalog.items.size)
             assertEquals("Catalog ongoing/fantasy/web-novel", catalog.items.first().name)
@@ -90,7 +101,7 @@ class LnReaderNovelAdapterRuntimeTest {
             assertEquals("catalog-499", catalog.items.last().path)
             assertEquals(2, catalog.nextPage)
             assertEquals("Protocol-relative covers are stored as safe absolute HTTPS URLs.",
-                "https://fixture.invalid/cover.png", catalog.items.first().cover)
+                "https://cdn.fixture.invalid/cover.png", catalog.items.first().cover)
             val secondCatalogPage = source.catalog(2, "")
             assertEquals(500, secondCatalogPage.items.size)
             assertEquals("catalog-500", secondCatalogPage.items.first().path)
@@ -103,11 +114,17 @@ class LnReaderNovelAdapterRuntimeTest {
             val novel = novelRepository.load(installed.sourceId, "authored-novel")
             assertEquals("Authored Novel", novel.detail.name)
             assertEquals("The parsed novel keeps a cacheable absolute cover URL.",
-                "https://fixture.invalid/cover.png", novel.detail.cover)
+                "https://cdn.fixture.invalid/cover.png", novel.detail.cover)
             val persistedChapters = novelRepository.chapters(novel.id)
             assertEquals("Parsed chapters are persisted as the novel repository's chapter rows.", 2, persistedChapters.size)
             assertEquals(1.0, persistedChapters[0].chapterNumber!!, 0.0001)
             assertEquals(2.0, persistedChapters[1].chapterNumber!!, 0.0001)
+
+            // Large chapter lists remain bounded by bytes and a generous explicit row ceiling;
+            // neither 300-row parsing nor the former 5,000 total cutoff can reject them.
+            assertEquals(5_001, source.detail("large-5001").chapters.size)
+            val largeNovel = novelRepository.load(installed.sourceId, "large-10001")
+            assertEquals(10_001, novelRepository.chapters(largeNovel.id).size)
             novelRepository.favorite(novel.id, true)
             val firstChapter = novelRepository.chapters(novel.id).first()
             novelRepository.bookmark(firstChapter.id, true)
@@ -128,6 +145,21 @@ class LnReaderNovelAdapterRuntimeTest {
             assertTrue(fixture.pluginRequests.get() >= 4)
 
             val coverUrl = requireNotNull(novel.detail.cover)
+            val blockedCover = runCatching { source.coverFile(coverUrl) }.exceptionOrNull()
+            assertTrue("The separately-hosted cover stays blocked before its review.", blockedCover is LnReaderUnapprovedCoverOriginException)
+            assertEquals(cdnOrigin, (blockedCover as LnReaderUnapprovedCoverOriginException).origin)
+            val cdnReview = manager.stagePlugin(repositoryUrl, "fixture-adapter")
+            assertTrue("Adding the CDN review carries the earlier API consent forward visibly.", apiOrigin in cdnReview.existingApprovedOrigins)
+            manager.installReviewed(
+                cdnReview.reviewToken,
+                cdnReview.sha256,
+                cdnReview.requiredOrigins + cdnReview.existingApprovedOrigins + cdnOrigin,
+            )
+            val trustedInstalled = requireNotNull(manager.currentInstalled(installed.sourceId))
+            assertTrue(apiOrigin in trustedInstalled.approvedOrigins)
+            assertTrue(cdnOrigin in trustedInstalled.approvedOrigins)
+            assertEquals("Catalog requests still work after the CDN is added.", 500, source.catalog(1, "").items.size)
+            assertTrue("Chapter fetches use the retained API grant.", source.chapter(firstChapter.path).contains("lantern keeper", ignoreCase = true))
             val ownedCover = requireNotNull(source.coverFile(coverUrl))
             assertTrue(ownedCover.isFile)
             val decodedCover = requireNotNull(BitmapFactory.decodeFile(ownedCover.absolutePath))
@@ -144,7 +176,7 @@ class LnReaderNovelAdapterRuntimeTest {
             manager.installReviewed(
                 reviewedAgain.reviewToken,
                 reviewedAgain.sha256,
-                reviewedAgain.requiredOrigins + "https://cdn.fixture.invalid:443",
+                reviewedAgain.requiredOrigins + reviewedAgain.existingApprovedOrigins + "https://future.fixture.invalid:443",
             )
             val clearedCatalog = withTimeout(10_000) {
                 pager.state.first { it.revision > loadedCatalog.revision && it.items.isEmpty() && !it.busy }
@@ -210,7 +242,13 @@ class LnReaderNovelAdapterRuntimeTest {
         }
 
         override suspend fun fetch(request: LnReaderHttpRequest, allowedOrigins: Set<String>, maxBytes: Int): LnReaderHttpResponse {
-            assertTrue("The fixture only serves the reviewed test origin.", "https://fixture.invalid:443" in allowedOrigins)
+            assertTrue("The original site remains in the reviewed origin set.", "https://fixture.invalid:443" in allowedOrigins)
+            if (request.url.contains("api.fixture.invalid")) {
+                assertTrue("API traffic is sent only after explicit review.", "https://api.fixture.invalid:443" in allowedOrigins)
+            }
+            if (request.url.contains("cdn.fixture.invalid")) {
+                assertTrue("Image traffic is sent only after explicit review.", "https://cdn.fixture.invalid:443" in allowedOrigins)
+            }
             assertFalse(request.headers.keys.any { it.equals("cookie", true) || it.equals("authorization", true) })
             if (request.url.endsWith("/cover.png")) {
                 assertEquals("POST", request.method)
@@ -279,33 +317,39 @@ class LnReaderNovelAdapterRuntimeTest {
               async popularNovels(pageNo, options) {
                 const genre = options.filters['genre[]'].value.join(',');
                 const type = options.filters['type[]'].value.join(',');
-                const url = 'https://fixture.invalid/catalog?page=' + pageNo + '&genre[]=' + genre + '&type[]=' + type;
+                const url = 'https://api.fixture.invalid/catalog?page=' + pageNo + '&genre[]=' + genre + '&type[]=' + type;
                 const response = await fetchApi(url);
                 const $ = load(await response.text());
                 storage.set('catalogFilter', options.filters.status.value);
                 return $('article').map((_, node) => ({ name: 'Catalog ' + options.filters.status.value + '/' + genre + '/' + type,
-                  path: $(node).attr('data-path'), cover: '//fixture.invalid/cover.png' })).get();
+                  path: $(node).attr('data-path'), cover: 'https://cdn.fixture.invalid/cover.png' })).get();
               },
               async searchNovels(term, pageNo) {
-                const response = await fetchApi('https://fixture.invalid/search');
+                const response = await fetchApi('https://api.fixture.invalid/search');
                 const $ = load(await response.text());
-                return [{ name: 'Search ' + term, path: 'authored-novel', cover: '//fixture.invalid/cover.png' }];
+                return [{ name: 'Search ' + term, path: 'authored-novel', cover: 'https://cdn.fixture.invalid/cover.png' }];
               },
               async parseNovel(path) {
-                const response = await fetchApi('https://fixture.invalid/detail');
+                const response = await fetchApi('https://api.fixture.invalid/detail');
                 await response.json();
-                return { name: 'Authored Novel', path, author: 'Fixture author', cover: '//fixture.invalid/cover.png',
+                const largeCount = path.startsWith('large-') ? Number(path.slice(6)) : 0;
+                const chapters = largeCount > 0
+                  ? Array.from({ length: largeCount }, (_, index) => ({
+                      name: 'Chapter ' + (index + 1), path: 'large-chapter-' + (index + 1), chapterNumber: index + 1,
+                    }))
+                  : [{ name: 'Chapter One', path: 'chapter-one', chapterNumber: 1, page: '1' }];
+                return { name: 'Authored Novel', path, author: 'Fixture author', cover: 'https://cdn.fixture.invalid/cover.png',
                   genres: 'fantasy', summary: 'A wholly authored compatibility fixture.', status: 'Ongoing',
-                  chapters: [{ name: 'Chapter One', path: 'chapter-one', chapterNumber: 1, page: '1' }], totalPages: 2 };
+                  chapters, totalPages: largeCount > 0 ? 1 : 2 };
               },
               async parsePage(path, page) {
-                const response = await fetchApi('https://fixture.invalid/page');
+                const response = await fetchApi('https://api.fixture.invalid/page');
                 await response.json();
                 return { chapters: [{ name: 'Chapter Two', path: 'chapter-two', chapterNumber: 2, page: '2' }] };
               },
               resolveUrl(path, isNovel) { return 'https://fixture.invalid/' + path; },
               async parseChapter(path) {
-                const response = await fetchApi('https://fixture.invalid/chapter');
+                const response = await fetchApi('https://api.fixture.invalid/chapter');
                 await response.text();
                 return '<article><h2>' + path + '</h2><p>The lantern keeper crossed the quiet northern harbor at dawn, carrying a careful map and a bright brass key.</p></article>';
               },
