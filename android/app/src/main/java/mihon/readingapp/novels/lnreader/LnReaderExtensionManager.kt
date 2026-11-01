@@ -30,6 +30,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
+import java.util.Collections
 import java.util.UUID
 
 data class LnReaderManagerSnapshot(
@@ -37,8 +38,11 @@ data class LnReaderManagerSnapshot(
     val installedPlugins: List<LnReaderInstalledPlugin>,
 )
 
-class LnReaderUnapprovedCoverOriginException(val origin: String) : IllegalArgumentException(
-    "This cover needs the exact origin $origin. Open Novel extensions, review the current bundle, and select this public HTTPS origin before trusting the update.",
+class LnReaderUnapprovedCoverOriginException internal constructor(
+    val origin: String,
+    internal val approvalSnapshot: LnReaderThumbnailOriginApprovalSnapshot,
+) : IllegalArgumentException(
+    "This cover needs the exact origin $origin. Add this thumbnail origin to the currently installed, reviewed source to retry the image.",
 )
 
 class LnReaderUnapprovedSourceOriginException(val origin: String) : IllegalArgumentException(
@@ -252,6 +256,47 @@ class LnReaderExtensionManager(
         stateLock.withLock { staged.remove(reviewToken) != null }
     }
 
+    /** Add only the exact origin shown for a blocked thumbnail, if its reviewed source is unchanged. */
+    internal suspend fun addThumbnailOrigin(
+        approval: LnReaderThumbnailOriginApprovalSnapshot,
+    ): LnReaderInstalledPlugin = withContext(Dispatchers.IO) {
+        val (updated, jobsToStop) = stateLock.withLock {
+            ensureLoaded()
+            val sourceId = approval.installed.sourceId
+            val current = state.installed[sourceId]
+                ?: error("This source is no longer installed. Return to the title and detect the thumbnail origin again.")
+            check(current == approval.installed) {
+                "This source or its approved origins changed. Return to the title and detect the thumbnail origin again."
+            }
+            check(current.enabled) { "This source is disabled. Enable the reviewed source and detect the thumbnail origin again." }
+            val origin = normalizePublicHttpsOrigin(approval.origin)
+            check(origin == approval.origin) { "The displayed thumbnail origin is no longer canonical. Detect it again." }
+            check(origin !in current.approvedOrigins) {
+                "The source's trust changed after this thumbnail origin was shown. Detect it again before adding access."
+            }
+            check(current.approvedOrigins.size < LN_READER_MAX_APPROVED_ORIGINS) {
+                "The approved origin limit has been reached."
+            }
+            val bundleDigest = verifiedInstalledBundleDigest(current)
+            check(bundleDigest == approval.bundleDigest && bundleDigest == current.sha256) {
+                "The installed bundle changed or failed its integrity check. Review the current bundle before adding an origin."
+            }
+            val nextPlugin = current.copy(approvedOrigins = current.approvedOrigins + origin)
+            val next = state.copy(installed = state.installed + (sourceId to nextPlugin))
+            writeState(next)
+            state = next
+            publishSnapshot()
+            nextPlugin to activeExecutions[sourceId].orEmpty().toList()
+        }
+        // Revoke executions carrying the previous origin set. The thumbnail retry starts only
+        // after those calls have stopped and will receive the new additive grant.
+        withContext(NonCancellable) {
+            jobsToStop.forEach { it.cancel(CancellationException("LNReader thumbnail origin trust changed.")) }
+            jobsToStop.joinAll()
+        }
+        updated
+    }
+
     suspend fun setEnabled(sourceId: String, enabled: Boolean): LnReaderInstalledPlugin = withContext(Dispatchers.IO) {
         val (updated, jobsToStop) = stateLock.withLock {
             ensureLoaded()
@@ -394,16 +439,30 @@ class LnReaderExtensionManager(
             val installed = state.installed[sourceId]
             if (installed == null || !installed.enabled) null
             else {
-                if (origin !in installed.approvedOrigins) throw LnReaderUnapprovedCoverOriginException(origin)
+                if (origin !in installed.approvedOrigins) {
+                    val reviewed = freezeInstalled(installed)
+                    val bundleDigest = verifiedInstalledBundleDigest(reviewed)
+                    throw LnReaderUnapprovedCoverOriginException(
+                        origin,
+                        LnReaderThumbnailOriginApprovalSnapshot(origin, reviewed, bundleDigest),
+                    )
+                }
                 installed.also { activeExecutions.getOrPut(sourceId) { linkedSetOf() }.add(job) }
             }
         } ?: return@withContext null
         try {
-            val response = broker.fetch(
-                LnReaderHttpRequest("cover", url, imageRequestInit.method, imageRequestInit.headers, imageRequestInit.body?.toByteArray()),
-                trusted.approvedOrigins,
-                MAX_COVER_BYTES,
-            )
+            val response = try {
+                broker.fetch(
+                    LnReaderHttpRequest("cover", url, imageRequestInit.method, imageRequestInit.headers, imageRequestInit.body?.toByteArray()),
+                    trusted.approvedOrigins,
+                    MAX_COVER_BYTES,
+                )
+            } catch (failure: LnReaderUnapprovedSourceOriginException) {
+                // A redirect destination is still a thumbnail origin. Surface it only if the
+                // exact trust snapshot used for this request remains current at detection time.
+                val approval = captureThumbnailOriginApproval(trusted, failure.origin)
+                throw LnReaderUnapprovedCoverOriginException(approval.origin, approval)
+            }
             currentCoroutineContext().ensureActive()
             if (response.status !in 200..299 || !validImage(response.body)) return@withContext null
             stateLock.withLock {
@@ -423,6 +482,29 @@ class LnReaderExtensionManager(
                 }
             }
         }
+    }
+
+    private suspend fun captureThumbnailOriginApproval(
+        expectedInstalled: LnReaderInstalledPlugin,
+        detectedOrigin: String,
+    ): LnReaderThumbnailOriginApprovalSnapshot = stateLock.withLock {
+        ensureLoaded()
+        val current = state.installed[expectedInstalled.sourceId]
+        check(current == expectedInstalled) {
+            "This source or its approved origins changed while the thumbnail was loading. Retry to detect the current origin."
+        }
+        check(current.enabled) { "This source was disabled while the thumbnail was loading." }
+        val origin = normalizePublicHttpsOrigin(detectedOrigin)
+        check(origin == detectedOrigin) { "The blocked thumbnail origin was not canonical." }
+        check(origin !in current.approvedOrigins) {
+            "The blocked thumbnail origin is already approved. Retry the cover with the current trust state."
+        }
+        val bundleDigest = verifiedInstalledBundleDigest(current)
+        LnReaderThumbnailOriginApprovalSnapshot(
+            origin,
+            freezeInstalled(current),
+            bundleDigest,
+        )
     }
 
     private fun parseCoverUrl(imageUrl: String): String = try {
@@ -607,6 +689,22 @@ class LnReaderExtensionManager(
         require(sourceId.matches(STABLE_SOURCE_ID) && sha256.matches(SHA256)) { "The stored source identity is invalid." }
         return bundleDirectory.resolve(sourceId).resolve("$sha256.js")
     }
+
+    private fun verifiedInstalledBundleDigest(installed: LnReaderInstalledPlugin): String {
+        val file = bundleFile(installed.sourceId, installed.sha256)
+        check(file.isFile && file.length() in 1..MAX_BUNDLE_BYTES.toLong()) {
+            "The installed plugin bundle is missing or invalid. Review the current bundle before adding an origin."
+        }
+        val digest = sha256(file.readBytes())
+        check(digest == installed.sha256) {
+            "The installed plugin bundle failed its integrity check. Review the current bundle before adding an origin."
+        }
+        return digest
+    }
+
+    private fun freezeInstalled(installed: LnReaderInstalledPlugin): LnReaderInstalledPlugin = installed.copy(
+        approvedOrigins = Collections.unmodifiableSet(LinkedHashSet(installed.approvedOrigins)),
+    )
 
     private fun pruneBundles(sourceId: String, keepHash: String) {
         bundleDirectory.resolve(sourceId).listFiles().orEmpty().filter { it.name != "$keepHash.js" }.forEach(File::delete)

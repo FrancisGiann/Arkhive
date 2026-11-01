@@ -35,6 +35,8 @@ import mihon.readingapp.novels.lnreader.LnReaderSandboxRuntime
 import mihon.readingapp.novels.lnreader.LnReaderHostFetch
 import mihon.readingapp.novels.lnreader.LnReaderHttpRequest
 import mihon.readingapp.novels.lnreader.LnReaderHttpResponse
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedCoverOriginException
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -147,54 +149,84 @@ class LnReaderExtensionUiRuntimeTest {
             waitFor("Catalog search action renders its authored result") { device.hasObject(By.text("UI Search Lantern")) }
             click("UI Search Lantern")
             waitFor("Novel detail offers a real read action") { device.hasObject(By.text("Start reading")) }
-            waitFor("A blocked cover exposes its exact origin") {
-                device.hasObject(By.textContains("This cover needs the exact origin https://images.fixture.invalid:443"))
-            }
-            click("Review extension origins")
-            waitFor("The review route focuses the source that returned this cover") {
-                device.hasObject(By.text("Review update")) && !device.hasObject(By.text("Find an extension"))
-            }
-            click("Review update")
-            waitFor("The extension review offers the observed cover host") {
-                device.hasObject(By.text("Add images.fixture.invalid:443"))
-            }
-            val suggestedCoverChip = requireNotNull(
-                requireNotNull(device.findObject(By.text("Add images.fixture.invalid:443"))).parent,
+            val addThumbnailDescription = By.desc(
+                "Add exact thumbnail origin https://images.fixture.invalid:443 to this source's approved origins",
             )
-            assertTrue("The observed origin is an explicit checkable chip.", suggestedCoverChip.isCheckable)
-            assertFalse("The observed origin is not preselected.", suggestedCoverChip.isChecked)
-            suggestedCoverChip.click()
-            waitFor("The host selection is visibly checked") {
-                requireNotNull(
-                    requireNotNull(device.findObject(By.text("Add images.fixture.invalid:443"))).parent,
-                ).isChecked
+            waitFor("A blocked cover displays its exact origin and one inline action") {
+                device.hasObject(By.textContains("This thumbnail needs the exact origin https://images.fixture.invalid:443")) &&
+                    device.hasObject(addThumbnailDescription)
             }
-            assertTrue(device.takeScreenshot(File(context.cacheDir, "lnreader-ui-origin-review-selected.png")))
-            click("Cancel")
-            waitFor("Cancelling origin review closes its trust dialog") { !device.hasObject(By.text("Trust and update")) }
-            assertFalse(
-                "Cancel does not persist the observed cover origin.",
-                "https://images.fixture.invalid:443" in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins,
+            assertFalse("Thumbnail approval does not open an extension review chain.", device.hasObject(By.text("Review extension origins")))
+            assertFalse("The detected CDN is not granted before the explicit tap.", "https://images.fixture.invalid:443" in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins)
+            assertTrue(device.takeScreenshot(File(context.cacheDir, "lnreader-ui-thumbnail-origin-inline.png")))
+            val coverRequestsBeforeGrant = transport.coverRequests.get()
+            requireNotNull(device.findObject(addThumbnailDescription)).click()
+            waitFor("One tap adds the exact CDN origin and retries the thumbnail") {
+                "https://images.fixture.invalid:443" in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins &&
+                    transport.coverRequests.get() > coverRequestsBeforeGrant &&
+                    !device.hasObject(addThumbnailDescription)
+            }
+            val installedAfterInlineGrant = requireNotNull(manager.currentInstalled(installed.sourceId))
+            assertEquals(
+                "The explicit tap adds only the detected CDN to the reviewed source's existing origins.",
+                setOf("https://fixture.invalid:443", "https://images.fixture.invalid:443"),
+                installedAfterInlineGrant.approvedOrigins,
             )
-            device.pressBack()
-            waitFor("Returning to the novel detail retries the blocked cover") {
-                device.hasObject(By.textContains("This cover needs the exact origin https://images.fixture.invalid:443"))
+
+            suspend fun blockedThumbnail(url: String) = try {
+                manager.coverFile(installed.sourceId, url)
+                throw AssertionError("Expected the controlled thumbnail redirect to be blocked.")
+            } catch (failure: LnReaderUnapprovedCoverOriginException) {
+                failure.approvalSnapshot
             }
 
-            click("Review extension origins")
+            val tamperedSnapshot = blockedThumbnail("https://images.fixture.invalid/redirect-tampered.png")
+            val bundleFile = File(sourceDirectory, "lnreader-compatible/bundles/${installed.sourceId}/${installed.sha256}.js")
+            val reviewedBundleBytes = bundleFile.readBytes()
+            bundleFile.writeBytes(reviewedBundleBytes + byteArrayOf(0))
+            try {
+                try {
+                    manager.addThumbnailOrigin(tamperedSnapshot)
+                    throw AssertionError("A tampered installed bundle must not receive a new origin grant.")
+                } catch (expected: IllegalStateException) {
+                    assertTrue(expected.message.orEmpty().contains("integrity check"))
+                }
+            } finally {
+                bundleFile.writeBytes(reviewedBundleBytes)
+            }
+            assertFalse("A blocked redirect is never approved automatically.", "https://tampered-cdn.fixture.invalid:443" in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins)
+
+            val staleSnapshot = blockedThumbnail("https://images.fixture.invalid/redirect-stale.png")
+            val freshSnapshot = blockedThumbnail("https://images.fixture.invalid/redirect-fresh.png")
+            assertFalse("A blocked redirect does not grant its destination before a tap.", "https://fresh-cdn.fixture.invalid:443" in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins)
+            manager.addThumbnailOrigin(freshSnapshot)
+            try {
+                manager.addThumbnailOrigin(staleSnapshot)
+                throw AssertionError("A snapshot with stale approved origins must not grant.")
+            } catch (expected: IllegalStateException) {
+                assertTrue(expected.message.orEmpty().contains("approved origins changed"))
+            }
+            assertFalse("The stale redirect target remains unapproved.", "https://stale-cdn.fixture.invalid:443" in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins)
+            assertTrue("A distinct, freshly detected origin is added without dropping prior grants.", setOf(
+                "https://fixture.invalid:443", "https://images.fixture.invalid:443", "https://fresh-cdn.fixture.invalid:443",
+            ).all { it in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins })
+            assertNotNull("The retry can load the thumbnail after its redirect origin is explicitly added.", manager.coverFile(installed.sourceId, "https://images.fixture.invalid/redirect-fresh.png"))
+
+            scenario.onActivity { requireNotNull(testNavigator.get()).push(NovelExtensionsScreen()) }
+            scrollUntilVisible("Review update")
             click("Review update")
-            waitFor("The focused extension update review reopens") { device.hasObject(By.text("Trust and update")) }
+            waitFor("The current extension update review is available") { device.hasObject(By.text("Trust and update")) }
             val additionalOriginInput = requireNotNull(device.findObject(By.clazz("android.widget.EditText")))
-            additionalOriginInput.text = "http://images.fixture.invalid/assets/cover.png?size=small"
+            additionalOriginInput.text = "http://review-cdn.fixture.invalid/assets/cover.png?size=small"
             scrollUntilVisible("HTTP origins cannot be trusted", contains = true, startYPercent = 75)
             waitFor("HTTP input shows the policy reason inline") {
                 device.hasObject(By.textContains("HTTP origins cannot be trusted"))
             }
             assertFalse("Trust is disabled for HTTP input.", clickableAncestor("Trust and update").isEnabled)
-            additionalOriginInput.text = "https://images.fixture.invalid/assets/cover.png?size=small,medium"
-            scrollUntilVisible("• https://images.fixture.invalid:443", startYPercent = 75)
+            additionalOriginInput.text = "https://review-cdn.fixture.invalid/assets/cover.png?size=small,medium"
+            scrollUntilVisible("• https://review-cdn.fixture.invalid:443", startYPercent = 75)
             waitFor("The review previews the exact normalized host and port") {
-                device.hasObject(By.text("• https://images.fixture.invalid:443"))
+                device.hasObject(By.text("• https://review-cdn.fixture.invalid:443"))
             }
             assertTrue("Trust is enabled only after valid HTTPS input.", clickableAncestor("Trust and update").isEnabled)
             assertTrue(device.takeScreenshot(File(context.cacheDir, "lnreader-ui-origin-review-preview.png")))
@@ -202,12 +234,12 @@ class LnReaderExtensionUiRuntimeTest {
             waitFor("The authored update was explicitly trusted") { device.hasObject(By.text("Done")) }
             assertTrue(
                 "The URL path/query adds only its exact origin.",
-                "https://images.fixture.invalid:443" in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins,
+                "https://review-cdn.fixture.invalid:443" in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins,
             )
             click("Done")
             device.pressBack()
             waitFor("The cover loads after returning to its updated source") {
-                transport.coverRequests.get() > 0 && !device.hasObject(By.textContains("This cover needs the exact origin https://images.fixture.invalid:443"))
+                transport.coverRequests.get() > 0 && !device.hasObject(addThumbnailDescription)
             }
             scenario.onActivity { requireNotNull(testNavigator.get()).push(NovelExtensionsScreen()) }
             scrollUntilVisible("Review update")
@@ -428,6 +460,15 @@ class LnReaderExtensionUiRuntimeTest {
                 request.url.endsWith("/ui-plugin.js") -> bundle
                 request.url.startsWith("https://images.fixture.invalid/") -> {
                     coverRequests.incrementAndGet()
+                    val redirectedOrigin = when {
+                        request.url.endsWith("/redirect-tampered.png") -> "https://tampered-cdn.fixture.invalid:443"
+                        request.url.endsWith("/redirect-stale.png") -> "https://stale-cdn.fixture.invalid:443"
+                        request.url.endsWith("/redirect-fresh.png") -> "https://fresh-cdn.fixture.invalid:443"
+                        else -> null
+                    }
+                    if (redirectedOrigin != null && redirectedOrigin !in allowedOrigins) {
+                        throw LnReaderUnapprovedSourceOriginException(redirectedOrigin)
+                    }
                     coverPng
                 }
                 request.url.endsWith("/plugin-executed") -> {

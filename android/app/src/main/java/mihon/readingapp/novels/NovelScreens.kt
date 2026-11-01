@@ -68,6 +68,7 @@ import mihon.icons.materialsymbols.rounded.LocalLibrary
 import mihon.icons.materialsymbols.rounded.Public
 import mihon.readingapp.novels.lnreader.LnReaderUnapprovedCoverOriginException
 import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
+import mihon.readingapp.novels.lnreader.LnReaderThumbnailOriginApprovalSnapshot
 import mihon.readingapp.novels.lnreader.normalizePublicHttpsOrigin
 
 class NovelCatalogScreen(private val sourceId: String) : Screen() {
@@ -180,7 +181,8 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
     var novel by remember {mutableStateOf<SavedNovel?>(null)};var chapters by remember {mutableStateOf(emptyList<ChapterState>())}
     var busy by remember {mutableStateOf(true)};var error by remember {mutableStateOf<String?>(null)};var refresh by remember {mutableIntStateOf(0)}
     var coverError by remember {mutableStateOf<String?>(null)}
-    var coverOriginSuggestion by remember {mutableStateOf<String?>(null)}
+    var coverOriginApproval by remember {mutableStateOf<LnReaderThumbnailOriginApprovalSnapshot?>(null)}
+    var addingThumbnailOrigin by remember { mutableStateOf(false) }
     var sourceOriginSuggestion by remember {mutableStateOf<String?>(null)}
     var coverRetry by remember {mutableIntStateOf(0)}
     var chapterPage by rememberSaveable(sourceId, path) { mutableIntStateOf(0) }
@@ -314,7 +316,7 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                                 sourceId, n.detail.name, n.detail.cover, Modifier.width(88.dp).height(126.dp),
                                 retryToken = refresh + coverRetry,
                                 onExtensionCoverError = { coverError = it },
-                                onUnapprovedCoverOrigin = { coverOriginSuggestion = it },
+                                onUnapprovedCoverOrigin = { coverOriginApproval = it },
                             )
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 InkKicker("Source edition", color = Ink.HeroMuted)
@@ -366,19 +368,49 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                                 .padding(start = 22.dp, end = 22.dp, bottom = 14.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Text(message, color = Ink.HeroMuted, fontSize = 12.sp)
-                            OutlinedButton(
-                                onClick = { coverRetry++ },
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
-                                border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
-                            ) { Text("Retry cover", maxLines = 2, overflow = TextOverflow.Ellipsis) }
-                            OutlinedButton(
-                                onClick = { nav.push(NovelExtensionsScreen(coverOriginSuggestion, sourceId)) },
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
-                                border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
-                            ) { Text("Review extension origins", maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                            val approval = coverOriginApproval?.takeIf { it.installed.sourceId == sourceId }
+                            if (approval != null) {
+                                Text("Thumbnail blocked", color = Ink.HeroMuted, fontSize = 12.sp)
+                                Text(
+                                    "This thumbnail needs the exact origin ${approval.origin}. Adding it approves this origin for the reviewed source.",
+                                    color = Ink.HeroMuted,
+                                    fontSize = 11.sp,
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        if (!addingThumbnailOrigin) scope.launch {
+                                            addingThumbnailOrigin = true
+                                            try {
+                                                sourceRegistry.lnReaderExtensions.addThumbnailOrigin(approval)
+                                                coverOriginApproval = null
+                                                coverRetry++
+                                            } catch (failure: Exception) {
+                                                if (failure is CancellationException) throw failure
+                                                coverOriginApproval = null
+                                                coverError = failure.message ?: "The thumbnail origin could not be added. Retry the cover to detect it again."
+                                            } finally {
+                                                addingThumbnailOrigin = false
+                                            }
+                                        }
+                                    },
+                                    enabled = !addingThumbnailOrigin,
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
+                                        contentDescription = "Add exact thumbnail origin ${approval.origin} to this source's approved origins"
+                                    },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
+                                    border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
+                                ) {
+                                    Text(if (addingThumbnailOrigin) "Adding thumbnail origin…" else "Add thumbnail origin")
+                                }
+                            } else {
+                                Text(message, color = Ink.HeroMuted, fontSize = 12.sp)
+                                OutlinedButton(
+                                    onClick = { coverRetry++ },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
+                                    border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
+                                ) { Text("Retry cover", maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                            }
                         }
                     }
                 }
@@ -551,17 +583,18 @@ class NovelDownloadsScreen : Screen() {
     modifier:Modifier,
     retryToken:Int=0,
     onExtensionCoverError:(String?)->Unit = {},
-    onUnapprovedCoverOrigin:(String?)->Unit = {},
+    onUnapprovedCoverOrigin:(LnReaderThumbnailOriginApprovalSnapshot?)->Unit = {},
 ) {
     val isExtension=sourceId.startsWith("lnreader.")
     val registry=currentNovelSources()
     val extension=remember(sourceId,registry,isExtension) {if(isExtension) runCatching {registry.get(sourceId) as? LnReaderNovelSource}.getOrNull() else null}
     var ownedModel by remember(sourceId,cover) {mutableStateOf<File?>(null)}
     val latestCoverError=rememberUpdatedState(onExtensionCoverError)
+    val latestUnapprovedCoverOrigin=rememberUpdatedState(onUnapprovedCoverOrigin)
     LaunchedEffect(sourceId,cover,retryToken) {
         ownedModel=null
         latestCoverError.value(null)
-        onUnapprovedCoverOrigin(null)
+        latestUnapprovedCoverOrigin.value(null)
         if(isExtension && cover!=null) {
             try {
                 ownedModel=extension?.coverFile(cover)
@@ -570,7 +603,7 @@ class NovelDownloadsScreen : Screen() {
                 throw cancelled
             } catch(failure:Exception) {
                 latestCoverError.value(failure.message ?: "The extension cover could not be loaded safely.")
-                onUnapprovedCoverOrigin((failure as? LnReaderUnapprovedCoverOriginException)?.origin)
+                latestUnapprovedCoverOrigin.value((failure as? LnReaderUnapprovedCoverOriginException)?.approvalSnapshot)
             }
         }
     }

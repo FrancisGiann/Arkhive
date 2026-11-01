@@ -37,6 +37,14 @@ data class LnReaderInstalledPlugin(
     val installedAt: Long,
 )
 
+/** Immutable evidence captured when a cover request first encounters an unapproved exact origin. */
+class LnReaderThumbnailOriginApprovalSnapshot internal constructor(
+    val origin: String,
+    internal val installed: LnReaderInstalledPlugin,
+    /** Digest of the currently installed bundle bytes, verified when this snapshot is made. */
+    internal val bundleDigest: String,
+)
+
 data class LnReaderInstallReview(
     val reviewToken: String,
     val metadata: LnReaderPluginMetadata,
