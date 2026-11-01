@@ -29,8 +29,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -53,15 +51,13 @@ fun ChapterPageControls(
     onPageChange: (Int) -> Unit,
     onCurrentPage: (() -> Unit)? = null,
     onNextUnreadPage: (() -> Unit)? = null,
+    onFindRequested: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    var requestedPage by remember(window.pageIndex, window.pageCount) {
-        mutableStateOf(if (window.pageCount == 0) "" else (window.pageIndex + 1).toString())
-    }
     var findDialogOpen by remember { mutableStateOf(false) }
     val hasPages = window.pageCount > 0
     val cardSurface = Ink.Raised
-    val cardContent = readableForeground(cardSurface)
+    val cardContent = inkReadableForeground(null, cardSurface)
 
     CompositionLocalProvider(LocalContentColor provides cardContent) {
         Column(
@@ -116,7 +112,9 @@ fun ChapterPageControls(
                     Icon(MaterialSymbols.AutoMirroredRounded.ArrowBack, contentDescription = "Previous page")
                 }
                 TextButton(
-                    onClick = { findDialogOpen = true },
+                    onClick = {
+                        if (onFindRequested == null) findDialogOpen = true else onFindRequested()
+                    },
                     colors = ButtonDefaults.textButtonColors(contentColor = cardContent),
                     modifier = Modifier
                         .weight(1f)
@@ -186,9 +184,31 @@ fun ChapterPageControls(
         }
     }
 
-    if (findDialogOpen) {
+    ChapterFindDialog(
+        open = findDialogOpen,
+        window = window,
+        query = query,
+        onQueryChange = onQueryChange,
+        onPageChange = onPageChange,
+        onDismiss = { findDialogOpen = false },
+    )
+}
+
+@Composable
+fun ChapterFindDialog(
+    open: Boolean,
+    window: ChapterPageWindow,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onPageChange: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var requestedPage by remember(window.pageIndex, window.pageCount) {
+        mutableStateOf(if (window.pageCount == 0) "" else (window.pageIndex + 1).toString())
+    }
+    if (open) {
         AlertDialog(
-            onDismissRequest = { findDialogOpen = false },
+            onDismissRequest = onDismiss,
             title = { Text("Find or jump to chapter") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -211,30 +231,20 @@ fun ChapterPageControls(
             },
             confirmButton = {
                 TextButton(
-                    enabled = hasPages && requestedPage.toIntOrNull() != null,
+                    enabled = window.pageCount > 0 && requestedPage.toIntOrNull() != null,
                     onClick = {
                         onPageChange((requestedPage.toInt() - 1).coerceIn(0, window.pageCount - 1))
-                        findDialogOpen = false
+                        onDismiss()
                     },
                 ) {
                     Text("Go")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { findDialogOpen = false }) {
+                TextButton(onClick = onDismiss) {
                     Text("Done")
                 }
             },
         )
     }
-}
-
-private fun readableForeground(surface: Color): Color {
-    fun contrast(color: Color): Float {
-        val light = maxOf(color.luminance(), surface.luminance())
-        val dark = minOf(color.luminance(), surface.luminance())
-        return (light + 0.05f) / (dark + 0.05f)
-    }
-
-    return if (contrast(Color.White) >= contrast(Color.Black)) Color.White else Color.Black
 }

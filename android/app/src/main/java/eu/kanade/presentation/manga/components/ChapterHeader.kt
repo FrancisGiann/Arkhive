@@ -2,11 +2,6 @@ package eu.kanade.presentation.manga.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.unit.sp
-import mihon.readingapp.design.Ink
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,6 +16,7 @@ import tachiyomi.presentation.core.components.material.SECONDARY_ALPHA
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
+import mihon.readingapp.design.InkDetailSectionHeading
 
 @Composable
 fun ChapterHeader(
@@ -40,10 +36,10 @@ fun ChapterHeader(
             .padding(horizontal = 22.dp, vertical = 0.dp),
         verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
     ) {
-        Row(Modifier.fillMaxWidth().heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
-            Text(stringResource(MR.strings.chapters).uppercase(),style=Ink.Display.copy(fontSize=21.sp,lineHeight=26.sp),color=Ink.Text)
-            if(chapterCount!=null) Text(pluralStringResource(MR.plurals.manga_num_chapters,chapterCount,chapterCount),fontSize=10.sp,color=Ink.Muted)
-        }
+        InkDetailSectionHeading(
+            title = stringResource(MR.strings.chapters),
+            count = chapterCount?.let { pluralStringResource(MR.plurals.manga_num_chapters, it, it) },
+        )
 
         MissingChaptersWarning(missingChapterCount)
     }

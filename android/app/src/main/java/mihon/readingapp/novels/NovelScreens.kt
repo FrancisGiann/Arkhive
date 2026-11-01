@@ -66,6 +66,8 @@ import mihon.icons.materialsymbols.MaterialSymbols
 import mihon.icons.materialsymbols.rounded.Info
 import mihon.icons.materialsymbols.rounded.LocalLibrary
 import mihon.icons.materialsymbols.rounded.Public
+import mihon.icons.materialsymbols.rounded.Download
+import mihon.icons.materialsymbols.rounded.Search
 import mihon.readingapp.novels.lnreader.LnReaderUnapprovedCoverOriginException
 import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 import mihon.readingapp.novels.lnreader.LnReaderThumbnailOriginApprovalSnapshot
@@ -187,10 +189,16 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
     var coverRetry by remember {mutableIntStateOf(0)}
     var chapterPage by rememberSaveable(sourceId, path) { mutableIntStateOf(0) }
     var chapterSearch by rememberSaveable(sourceId, path) { mutableStateOf("") }
+    var chapterFindDialogOpen by remember { mutableStateOf(false) }
     var chapterNavigationNonce by rememberSaveable(sourceId, path) { mutableIntStateOf(0) }
     var lastHandledChapterNavigationNonce by remember(sourceId, path) { mutableIntStateOf(chapterNavigationNonce) }
     var chaptersReady by remember(sourceId, path) { mutableStateOf(false) }
     val chapterListState = rememberLazyListState()
+    val toolbarTitle by remember(chapterListState, novel?.detail?.name) {
+        derivedStateOf {
+            if (chapterListState.firstVisibleItemIndex > 0 || chapterListState.firstVisibleItemScrollOffset > 0) novel?.detail?.name else null
+        }
+    }
     var tools by remember { mutableStateOf(false) }
     var synopsis by remember { mutableStateOf(false) }
     var shelfPicker by remember { mutableStateOf(false) }
@@ -290,9 +298,17 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
         life.addObserver(observer);onDispose {life.removeObserver(observer)}
     }
     fun queue(keys:Collection<String>) {scope.launch {runCatching {repository.queue(requireNotNull(novel).id,keys)}.fold({feedback="$it chapters added to Downloads"},{feedback=it.message});batches=false;selected=emptySet();selecting=false}}
+    val heroForeground = inkReadableForeground(Ink.HeroText, Ink.HeroSurface)
     InkStatusBarStyle(Ink.HeroSurface)
     Column(Modifier.fillMaxSize().background(Ink.HeroSurface)) {
-        ArkhiveSettingsHeader("Novel", { nav.pop(); Unit }, hero = true)
+        InkCompactDetailToolbar(title = toolbarTitle, onBack = { nav.pop(); Unit }) {
+            IconButton(onClick = { batches = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                Icon(MaterialSymbols.Rounded.Download, "Download chapters", tint = heroForeground)
+            }
+            IconButton(onClick = { chapterFindDialogOpen = true }, modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) {
+                Icon(MaterialSymbols.Rounded.Search, "Find chapters", tint = heroForeground)
+            }
+        }
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth().background(Ink.Panel),
             state = chapterListState,
@@ -306,59 +322,36 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                     val queuedCount = titleDownloads.count { it.state == "queued" }
                     val retryCount = titleDownloads.count { it.state == "retry" }
                     val failedCount = titleDownloads.count { it.state == "failed" }
-                    Column(
-                        Modifier.fillMaxWidth().background(Ink.HeroSurface)
-                            .padding(horizontal = 22.dp, vertical = 18.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val downloadStatus = buildList {
+                        add(if (n.totalChapters > 0 && saved == n.totalChapters) "Saved offline" else "Saved $saved/${n.totalChapters}")
+                        if (activeCount > 0) add("$activeCount downloading")
+                        if (queuedCount > 0) add(if (updates.paused) "$queuedCount queued · paused" else "$queuedCount queued")
+                        if (retryCount > 0) add("$retryCount to retry")
+                        if (failedCount > 0) add("$failedCount failed")
+                    }.joinToString(" · ")
+                    Column(Modifier.fillMaxWidth().background(Ink.HeroSurface)) {
+                        InkSeriesDetailHero(
+                            title = n.detail.name,
+                            sourceKicker = "From your source",
+                            author = n.detail.author,
+                            source = "${runCatching { sourceRegistry.get(sourceId).name }.getOrDefault("Saved novel source")} · ${chapters.size} chapters",
+                            metadata = listOf(downloadStatus),
+                            bottomPadding = 8.dp,
+                        ) { coverModifier ->
                             NovelCoverImage(
-                                sourceId, n.detail.name, n.detail.cover, Modifier.width(88.dp).height(126.dp),
+                                sourceId, n.detail.name, n.detail.cover, coverModifier,
                                 retryToken = refresh + coverRetry,
                                 onExtensionCoverError = { coverError = it },
                                 onUnapprovedCoverOrigin = { coverOriginApproval = it },
                             )
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                InkKicker("Source edition", color = Ink.HeroMuted)
-                                n.detail.author?.let { Text(it, color = Ink.HeroMuted, fontSize = 12.sp) }
-                                Text(
-                                    "${runCatching { sourceRegistry.get(sourceId).name }.getOrDefault("Saved novel source")} · ${chapters.size} chapters",
-                                    color = Ink.HeroMuted,
-                                    fontSize = 11.sp,
-                                )
-                                Text(buildList {
-                                    add(if (n.totalChapters > 0 && saved == n.totalChapters) "Saved offline" else "Saved $saved/${n.totalChapters}")
-                                    if (activeCount > 0) add("$activeCount downloading")
-                                    if (queuedCount > 0) add(if (updates.paused) "$queuedCount queued · paused" else "$queuedCount queued")
-                                    if (retryCount > 0) add("$retryCount to retry")
-                                    if (failedCount > 0) add("$failedCount failed")
-                                }.joinToString(" · "), color = Ink.HeroMuted, fontSize = 11.sp)
-                            }
                         }
-                        Text(
-                            text = n.detail.name,
-                            modifier = Modifier.fillMaxWidth().semantics { contentDescription = n.detail.name },
-                            style = Ink.Display.copy(fontSize = 23.sp, lineHeight = 29.sp),
-                            color = Ink.HeroText,
+                        InkSeriesLibraryActions(
+                            inLibrary = n.favorite,
+                            onLibraryClick = { scope.launch { repository.favorite(n.id, !n.favorite); reload() } },
+                            onMoreClick = { tools = true },
+                            modifier = Modifier.fillMaxWidth().background(Ink.HeroSurface).padding(bottom = 14.dp),
+                            contentColor = Ink.HeroText,
                         )
-                        FlowRow(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            OutlinedButton(
-                                onClick = { scope.launch { repository.favorite(n.id, !n.favorite); reload() } },
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
-                                border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
-                            ) { Text(if (n.favorite) "In your library ✓" else "Add to library", maxLines = 2, overflow = TextOverflow.Ellipsis) }
-                            OutlinedButton(
-                                onClick = { tools = true },
-                                modifier = Modifier.heightIn(min = 48.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
-                                border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
-                            ) { Text("Series tools", maxLines = 2, overflow = TextOverflow.Ellipsis) }
-                        }
                     }
                 }
                 coverError?.let { message ->
@@ -370,10 +363,10 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                         ) {
                             val approval = coverOriginApproval?.takeIf { it.installed.sourceId == sourceId }
                             if (approval != null) {
-                                Text("Thumbnail blocked", color = Ink.HeroMuted, fontSize = 12.sp)
+                                Text("Thumbnail blocked", color = heroForeground, fontSize = 12.sp)
                                 Text(
                                     "This thumbnail needs the exact origin ${approval.origin}. Adding it approves this origin for the reviewed source.",
-                                    color = Ink.HeroMuted,
+                                    color = heroForeground,
                                     fontSize = 11.sp,
                                 )
                                 OutlinedButton(
@@ -397,18 +390,18 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics {
                                         contentDescription = "Add exact thumbnail origin ${approval.origin} to this source's approved origins"
                                     },
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
-                                    border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = heroForeground),
+                                    border = BorderStroke(1.dp, heroForeground.copy(alpha = 0.7f)),
                                 ) {
                                     Text(if (addingThumbnailOrigin) "Adding thumbnail origin…" else "Add thumbnail origin")
                                 }
                             } else {
-                                Text(message, color = Ink.HeroMuted, fontSize = 12.sp)
+                                Text(message, color = heroForeground, fontSize = 12.sp)
                                 OutlinedButton(
                                     onClick = { coverRetry++ },
                                     modifier = Modifier.heightIn(min = 48.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink.HeroText),
-                                    border = BorderStroke(1.dp, Ink.HeroText.copy(alpha = 0.7f)),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = heroForeground),
+                                    border = BorderStroke(1.dp, heroForeground.copy(alpha = 0.7f)),
                                 ) { Text("Retry cover", maxLines = 2, overflow = TextOverflow.Ellipsis) }
                             }
                         }
@@ -416,12 +409,11 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                 }
             }
             item(key = "detail-chapter-panel") {
-                Column(Modifier.fillMaxWidth().background(Ink.HeroSurface)) {
-                    Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
-                            .background(Ink.Panel).padding(horizontal = 22.dp, vertical = 18.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                        .background(Ink.Panel).padding(horizontal = 22.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                     error?.let { problem ->
                         Text(problem, color = Ink.Muted)
@@ -434,21 +426,22 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                         TextButton(onClick = { refresh++ }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Retry source") }
                     }
                     novel?.let { n ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            InkKicker("Chapters")
-                            TextButton(onClick = { refresh++ }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text("Refresh") }
-                        }
-                        Button(
-                            onClick = { context.startActivity(NovelReaderActivity.intent(context, n.id, n.lastChapter)) },
+                        InkDetailSectionHeading(
+                            title = "Chapters",
+                            count = if (chapters.size == 1) "1 chapter" else "${chapters.size} chapters",
+                            surface = Ink.Panel,
+                        )
+                        InkDetailPrimaryReadButton(
+                            text = if (n.lastChapter == null) "Start reading" else "Continue reading",
                             enabled = chapters.isNotEmpty(),
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        ) { Text(if (n.lastChapter == null) "Start reading" else "Continue reading") }
+                            onClick = { context.startActivity(NovelReaderActivity.intent(context, n.id, n.lastChapter)) },
+                        )
                         FlowRow(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            InkPill("Download") { batches = true }
+                            TextButton(onClick = { refresh++ }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text("Refresh") }
                             InkPill(if (selecting) "Done" else "Select") { selecting = !selecting; selected = emptySet() }
                             InkPill("Queue") { nav.push(NovelDownloadsScreen()) }
                         }
@@ -464,10 +457,9 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                         }
                     }
                 }
-                }
             }
             stickyHeader(key = "chapter-page-controls") {
-                Box(Modifier.fillMaxWidth().background(Ink.HeroSurface).padding(horizontal = 22.dp)) {
+                Box(Modifier.fillMaxWidth().background(Ink.Panel).padding(horizontal = 22.dp)) {
                     ChapterPageControls(
                         window = chapterWindow,
                         totalItems = filteredChapters.size,
@@ -480,6 +472,7 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
                         onNextUnreadPage = nextUnreadChapterIndex?.let { index ->
                             { goToChapter(index) }
                         },
+                        onFindRequested = { chapterFindDialogOpen = true },
                     )
                 }
             }
@@ -517,6 +510,14 @@ class NovelDetailScreen(private val sourceId:String,private val path:String) : S
             }
         }
     }
+    ChapterFindDialog(
+        open = chapterFindDialogOpen,
+        window = chapterWindow,
+        query = chapterSearch,
+        onQueryChange = { chapterSearch = it.take(120); chapterPage = 0; chapterNavigationNonce++ },
+        onPageChange = { chapterPage = it; chapterNavigationNonce++ },
+        onDismiss = { chapterFindDialogOpen = false },
+    )
     novel?.let { n ->
         if (tools) SeriesToolsDialog(
             actions = listOf(

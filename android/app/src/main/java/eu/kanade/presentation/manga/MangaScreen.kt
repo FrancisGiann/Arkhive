@@ -494,10 +494,14 @@ private fun MangaScreenSmallImpl(
                             missingChapterCount = state.missingChapterCount,
                             onClick = onFilterClicked,
                         )
-                            if (state.hasUnreadChapters && !isAnySelected) Box(Modifier.fillMaxWidth().padding(horizontal=22.dp).heightIn(min=48.dp).inkPress(onContinueReading),contentAlignment=Alignment.Center) {
-                                Box(Modifier.fillMaxWidth().heightIn(min=35.dp).clip(RoundedCornerShape(8.dp)).background(Ink.Violet).padding(vertical=8.dp),contentAlignment=Alignment.Center) {
-                                    Text(if(state.hasReadChapters) "Continue reading" else "Start reading",color=Ink.OnViolet,fontSize=11.sp,fontWeight=androidx.compose.ui.text.font.FontWeight.Bold)
-                                }
+                            if (state.hasUnreadChapters && !isAnySelected) {
+                                InkDetailPrimaryReadButton(
+                                    text = if (state.hasReadChapters) "Continue reading" else "Start reading",
+                                    enabled = true,
+                                    onClick = onContinueReading,
+                                    modifier = Modifier.padding(vertical = 2.dp),
+                                    horizontalPadding = 22.dp,
+                                )
                             }
                         }
                     }

@@ -1,6 +1,7 @@
 package mihon.readingapp.navigation
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -80,6 +81,7 @@ private data class ShelfStory(val key: String, val title: String, val author: St
     val navigator = LocalNavigator.currentOrThrow
     val tabs = LocalTabNavigator.current
     val scope = rememberCoroutineScope()
+    val density = androidx.compose.ui.platform.LocalDensity.current
     val mangaState by remember { graph.mangaRepository.getLibraryMangaAsFlow().map { it as List<tachiyomi.domain.library.model.LibraryManga>? } }.collectAsStateWithLifecycle(null)
     val bookState by remember { graph.localBookRepository.observeBooks().map { it as List<LocalBook>? } }.collectAsStateWithLifecycle(null)
     val novelState by graph.novelRepository.state.collectAsStateWithLifecycle()
@@ -103,6 +105,8 @@ private data class ShelfStory(val key: String, val title: String, val author: St
     var feedback by remember { mutableStateOf<String?>(null) }
     var openingStoryKey by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf(emptySet<String>()) }
+    var selectionSurfaceHeightPx by remember(density) { mutableIntStateOf(with(density) { 340.dp.roundToPx() }) }
+    val selectionSurfaceHeight = with(density) { selectionSurfaceHeightPx.toDp() }
     var confirmDeleteCopies by remember { mutableStateOf(false) }
     var organize by remember { mutableStateOf(false) }
     var addToShelves by remember { mutableStateOf(false) }
@@ -111,6 +115,7 @@ private data class ShelfStory(val key: String, val title: String, val author: St
     var hiddenVisit by rememberSaveable { mutableStateOf(false) }
     var collection by rememberSaveable(libraryTools.dashboardCollection) { mutableStateOf(libraryTools.dashboardCollection) }
     val snackbar = remember { SnackbarHostState() }
+    BackHandler(enabled = selected.isNotEmpty()) { selected = emptySet() }
     fun selectDashboard(filterValue: String = filter, collectionValue: String = collection) {
         filter = filterValue
         collection = collectionValue
@@ -293,10 +298,10 @@ private data class ShelfStory(val key: String, val title: String, val author: St
             }
         }
     }
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
     LazyVerticalGrid(GridCells.Adaptive(if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.4f) 145.dp else 92.dp),
         Modifier.fillMaxSize().background(Ink.Canvas).statusBarsPadding().padding(horizontal = 24.dp),
-        contentPadding = PaddingValues(top = 40.dp, bottom = if (selected.isEmpty()) 24.dp else 184.dp), horizontalArrangement = Arrangement.spacedBy(26.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        contentPadding = PaddingValues(top = 40.dp, bottom = if (selected.isEmpty()) 24.dp else selectionSurfaceHeight + 48.dp), horizontalArrangement = Arrangement.spacedBy(26.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 InkKicker(if(hiddenVisit) "Revealed for this visit" else "Pick up your story")
@@ -405,25 +410,22 @@ private data class ShelfStory(val key: String, val title: String, val author: St
             }
         }
     }
-    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (selected.isEmpty()) 12.dp else 176.dp))
-    if (selected.isNotEmpty()) Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp),shape=RoundedCornerShape(18.dp),color=Ink.Panel,shadowElevation=8.dp) {
-        Column(Modifier.padding(horizontal=14.dp,vertical=10.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                IconButton(onClick={selected=emptySet()}) { Icon(MaterialSymbols.Rounded.Close,"Close selection",tint=Ink.Text) }
-                Text("${selected.size} selected",Modifier.weight(1f),color=Ink.Text,fontWeight=androidx.compose.ui.text.font.FontWeight.Bold)
-            }
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
-                TextButton(onClick={addToShelves=true}) { Text("Add to shelf") }
-                TextButton(onClick={organize=true}) { Text("Organize") }
-                if(selected.size==1) TextButton(onClick={navigator.push(mihon.readingapp.library.SeriesToolsScreen(selected.single()));selected=emptySet()}) {Text("Series options")}
-                TextButton(onClick={confirmHide=true}) { Text(if(hiddenVisit) "Unhide" else "Hide") }
-            }
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
-                TextButton(onClick=::removeSelectedFromLibrary) { Text("Remove from library") }
-                TextButton(onClick={confirmDeleteCopies=true}) { Text("Delete copies") }
-            }
-        }
-    }
+    SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = if (selected.isEmpty()) 12.dp else selectionSurfaceHeight + 36.dp))
+    if (selected.isNotEmpty()) InkLibrarySelectionActions(
+        selectedCount = selected.size,
+        hiddenVisit = hiddenVisit,
+        showSeriesOptions = selected.size == 1,
+        maxHeight = maxHeight * .72f,
+        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp),
+        onMeasuredHeight = { measured -> if (measured != selectionSurfaceHeightPx) selectionSurfaceHeightPx = measured },
+        onClose = { selected = emptySet() },
+        onAddToShelf = { addToShelves = true },
+        onOrganize = { organize = true },
+        onSeriesOptions = { navigator.push(mihon.readingapp.library.SeriesToolsScreen(selected.single())); selected = emptySet() },
+        onToggleHidden = { confirmHide = true },
+        onRemoveFromLibrary = ::removeSelectedFromLibrary,
+        onDeleteCopies = { confirmDeleteCopies = true },
+    )
     }
     if (filtersOpen) ModalBottomSheet(
         onDismissRequest={filtersOpen=false},

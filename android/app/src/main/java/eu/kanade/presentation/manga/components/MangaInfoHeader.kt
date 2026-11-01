@@ -8,16 +8,13 @@ import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
 import androidx.compose.animation.graphics.vector.AnimatedImageVector
 import androidx.compose.foundation.background
 import mihon.readingapp.design.*
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,7 +22,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.appendInlineContent
@@ -60,7 +56,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.LinkAnnotation
@@ -135,69 +130,28 @@ fun MangaInfoBox(
     doSearch: (query: String, global: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(
-        modifier.fillMaxWidth().background(Ink.HeroSurface).inkSlashes(Ink.Violet.copy(alpha=.18f))
-            .padding(start=16.dp,top=appBarPadding+16.dp,end=16.dp,bottom=20.dp),
-    ) {
-        val coverWidth = when {
-            maxWidth < 280.dp -> 68.dp
-            maxWidth < 340.dp -> 78.dp
-            else -> 94.dp
-        }
-        val titleFontSize = when {
-            maxWidth < 280.dp -> 21.sp
-            maxWidth < 360.dp -> 23.sp
-            else -> 26.sp
-        }
-        val titleLineHeight = when {
-            maxWidth < 280.dp -> 25.sp
-            maxWidth < 360.dp -> 27.sp
-            else -> 30.sp
-        }
-        val title = manga.title.removeSuffix(" · Original demo")
-        val stackedTitle = maxWidth < 320.dp || (LocalDensity.current.fontScale >= 1.2f && maxWidth < 400.dp)
-        val displayTitle = title
-        val coverTitleGap = if (maxWidth < 280.dp) 12.dp else 18.dp
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(coverTitleGap),
-                verticalAlignment = Alignment.Top,
-            ) {
-                MangaCover.Book(
-                    modifier = Modifier.widthIn(max = coverWidth),
-                    data = ImageRequest.Builder(LocalContext.current).data(manga).build(),
-                    contentDescription = stringResource(MR.strings.manga_cover),
-                    onClick = onCoverClick,
-                )
-                Column(Modifier.weight(1f).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    InkKicker(
-                        if (isStubSource) "Source unavailable" else if (source.id == mihon.readingapp.fixtures.OriginalDemoSource.MANGA_ID || source.id == mihon.readingapp.fixtures.OriginalDemoSource.WEBTOON_ID) "Demo catalog" else "From your source",
-                        color = Ink.HeroMuted,
-                    )
-                    if (!stackedTitle) Text(
-                        text = displayTitle,
-                        style = Ink.Display.copy(fontSize = titleFontSize, lineHeight = titleLineHeight),
-                        color = Ink.HeroText,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = title }
-                            .clickableNoIndication(onClick = { doSearch(manga.title, true) }),
-                    )
-                    manga.author?.let { Text(it, color = Ink.HeroMuted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
-                    Text(source.getNameForMangaInfo(), color = Ink.HeroMuted, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            if (stackedTitle) Text(
-                text = displayTitle,
-                style = Ink.Display.copy(fontSize = titleFontSize, lineHeight = titleLineHeight),
-                color = Ink.HeroText,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().semantics { contentDescription = title }
-                    .clickableNoIndication(onClick = { doSearch(manga.title, true) }),
-            )
-        }
+    val title = manga.title.removeSuffix(" · Original demo")
+    val sourceKicker = when {
+        isStubSource -> "Source unavailable"
+        source.id == mihon.readingapp.fixtures.OriginalDemoSource.MANGA_ID ||
+            source.id == mihon.readingapp.fixtures.OriginalDemoSource.WEBTOON_ID -> "Demo catalog"
+        else -> "From your source"
+    }
+    InkSeriesDetailHero(
+        title = title,
+        sourceKicker = sourceKicker,
+        author = manga.author,
+        source = source.getNameForMangaInfo(),
+        topPadding = appBarPadding + 16.dp,
+        modifier = modifier,
+        onTitleClick = { doSearch(manga.title, true) },
+    ) { coverModifier ->
+        MangaCover.Book(
+            modifier = coverModifier,
+            data = ImageRequest.Builder(LocalContext.current).data(manga).build(),
+            contentDescription = stringResource(MR.strings.manga_cover),
+            onClick = onCoverClick,
+        )
     }
 }
 
@@ -216,13 +170,16 @@ fun MangaActionRow(
     onSynopsis: (() -> Unit)? = null,
     onAddToShelf: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    contentColor: Color = Ink.Text,
+    contentColor: Color = Ink.HeroText,
 ) {
     var tools by remember { mutableStateOf(false) }
-    Row(modifier.fillMaxWidth().padding(horizontal=22.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically) {
-        androidx.compose.material3.TextButton(onClick=onAddToLibraryClicked,modifier=Modifier.weight(1f).heightIn(min=48.dp)) { Text(if(favorite) "✓  In library" else "+  Add to library",color=contentColor,fontSize=11.sp) }
-        androidx.compose.material3.TextButton(onClick={tools=true},modifier=Modifier.heightIn(min=48.dp)) { Text("More",color=contentColor,fontSize=11.sp) }
-    }
+    InkSeriesLibraryActions(
+        inLibrary = favorite,
+        onLibraryClick = onAddToLibraryClicked,
+        onMoreClick = { tools = true },
+        modifier = modifier,
+        contentColor = contentColor,
+    )
     if (tools) {
         val actions = buildList {
             onSynopsis?.let { add(SeriesToolAction("Synopsis & tags", MaterialSymbols.Rounded.Info, it)) }

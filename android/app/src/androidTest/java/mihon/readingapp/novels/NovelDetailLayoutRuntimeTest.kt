@@ -37,6 +37,8 @@ class NovelDetailLayoutRuntimeTest {
 
     @Test fun paginationControlsFitNarrowLargeTextAndKeepJumpAvailableAfterNoMatches() = kotlinx.coroutines.runBlocking {
         val suffix = UUID.randomUUID().toString().take(8)
+        val uiVariant = InstrumentationRegistry.getArguments().getString("arkhive_ui_variant", "revised")
+        assertTrue("Pass arkhive_ui_variant=baseline or revised", uiVariant in setOf("baseline", "revised"))
         val sourceId = "qa.novel-detail.$suffix"
         val path = "detail-$suffix"
         val title = "The Mercenary’s Extraordinary Machinations Across the Kingdom Beyond the Forgotten Mountain Citadel and the Crimson Sea"
@@ -92,11 +94,28 @@ class NovelDetailLayoutRuntimeTest {
 
             val titleNode = device.wait(Until.findObject(By.desc(title)), 12_000)
             assertNotNull("The full source title is exposed as an accessible label", titleNode)
-            assertTrue("Series tools remain reachable in the hero", device.hasObject(By.text("Series tools")))
+            assertTrue("Library membership remains reachable in the shared hero", device.hasObject(By.textContains("Add to library")))
+            assertTrue(
+                "Series actions remain reachable in the hero",
+                device.hasObject(By.text(if (uiVariant == "baseline") "Series tools" else "More")),
+            )
+            assertTrue(
+                "Batch downloads remain reachable",
+                device.hasObject(if (uiVariant == "baseline") By.text("Download") else By.desc("Download chapters")),
+            )
             assertTrue("The accessible title has rendered bounds", requireNotNull(titleNode).visibleBounds.height() > 0)
+            val toolbarSearch = device.findObject(By.desc("Find chapters"))
+            if (uiVariant == "revised") {
+                assertNotNull("The compact toolbar exposes search in the redesigned detail", toolbarSearch)
+            }
+            toolbarSearch?.let { search ->
+                search.click()
+                assertNotNull("Toolbar search opens its screen-owned dialog from the hero", device.wait(Until.findObject(By.text("Find or jump to chapter")), 5_000))
+                click("Done")
+            }
             android.util.Log.i("NovelDetailLayout", "HERO_READY")
             Thread.sleep(5_000) // Allows a host screencap of the real rendered state.
-            assertTrue("Capture the rendered long-title hero", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-long-title-1.3x.png")))
+            assertTrue("Capture the rendered long-title hero", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-long-title-1.3x-$uiVariant.png")))
 
             val chaptersHeading = By.text("CHAPTERS") // InkKicker renders headings in uppercase.
             for (attempt in 0 until 8) {
@@ -108,7 +127,7 @@ class NovelDetailLayoutRuntimeTest {
             assertNotNull("The primary reading action remains reachable after the long hero", device.wait(Until.findObject(By.text("Start reading")), 5_000))
             android.util.Log.i("NovelDetailLayout", "CHAPTERS_READY")
             Thread.sleep(5_000) // Allows a host screencap of the real rendered state.
-            assertTrue("Capture the rendered chapter panel", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-chapters-1.3x.png")))
+            assertTrue("Capture the rendered chapter panel", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-chapters-1.3x-$uiVariant.png")))
 
             val pageOne = By.desc("Page 1 of 3. Find or jump to a chapter or search.")
             for (attempt in 0 until 8) {
@@ -117,7 +136,7 @@ class NovelDetailLayoutRuntimeTest {
                     (device.displayHeight * .58).toInt(), 20)
             }
             assertNotNull("More than 100 chapters show a page indicator and jump action", device.wait(Until.findObject(pageOne), 5_000))
-            assertTrue("Capture the compact pager at narrow width and large font scale", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-pager-320dp-1.3x.png")))
+            assertTrue("Capture the compact pager at narrow width and large font scale", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-pager-320dp-1.3x-$uiVariant.png")))
             assertTrue("The current or next unread action remains available", device.hasObject(By.text("Next unread")))
             val previousButton = requireNotNull(device.findObject(By.desc("Previous page")))
             val nextButton = requireNotNull(device.findObject(By.desc("Next page")))
