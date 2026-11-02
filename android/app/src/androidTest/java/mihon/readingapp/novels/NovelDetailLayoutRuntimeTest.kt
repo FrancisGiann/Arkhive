@@ -129,7 +129,13 @@ class NovelDetailLayoutRuntimeTest {
             Thread.sleep(5_000) // Allows a host screencap of the real rendered state.
             assertTrue("Capture the rendered chapter panel", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-chapters-1.3x-$uiVariant.png")))
 
-            val pageOne = By.desc("Page 1 of 3. Find or jump to a chapter or search.")
+            val pageOne = By.desc(
+                if (uiVariant == "revised") {
+                    "Page 1 of 3. Chapters 1 to 100 of 250. Find or jump to a chapter or search."
+                } else {
+                    "Page 1 of 3. Find or jump to a chapter or search."
+                },
+            )
             for (attempt in 0 until 8) {
                 if (device.hasObject(pageOne)) break
                 device.swipe(device.displayWidth / 2, (device.displayHeight * .78).toInt(), device.displayWidth / 2,
@@ -137,7 +143,13 @@ class NovelDetailLayoutRuntimeTest {
             }
             assertNotNull("More than 100 chapters show a page indicator and jump action", device.wait(Until.findObject(pageOne), 5_000))
             assertTrue("Capture the compact pager at narrow width and large font scale", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-pager-320dp-1.3x-$uiVariant.png")))
-            assertTrue("The current or next unread action remains available", device.hasObject(By.text("Next unread")))
+            if (uiVariant == "revised" && device.hasObject(By.desc("More chapter actions"))) {
+                requireNotNull(device.findObject(By.desc("More chapter actions"))).click()
+                assertNotNull("Narrow layout keeps Next unread in the labeled actions menu", device.findObject(By.text("Next unread")))
+                device.pressBack()
+            } else {
+                assertTrue("The next unread action remains available", device.hasObject(By.text("Next unread")))
+            }
             val previousButton = requireNotNull(device.findObject(By.desc("Previous page")))
             val nextButton = requireNotNull(device.findObject(By.desc("Next page")))
             val densityScale = context.resources.displayMetrics.density
@@ -146,23 +158,104 @@ class NovelDetailLayoutRuntimeTest {
             val minTouchTarget = (48 * densityScale).toInt()
             assertTrue("Previous page target is at least 48dp", previousButton.visibleBounds.width() >= minTouchTarget)
             assertTrue("Next page target is at least 48dp", nextButton.visibleBounds.width() >= minTouchTarget)
+            assertTrue("First page disables Previous", !previousButton.isEnabled)
             assertTrue("Previous page stays inside the 320dp viewport", previousButton.visibleBounds.left >= viewportLeft)
             assertTrue("Next page stays inside the 320dp viewport", nextButton.visibleBounds.right <= viewportLeft + viewportWidth)
             nextButton.click()
-            val pageTwo = By.desc("Page 2 of 3. Find or jump to a chapter or search.")
+            val pageTwo = By.desc(
+                if (uiVariant == "revised") {
+                    "Page 2 of 3. Chapters 101 to 200 of 250. Find or jump to a chapter or search."
+                } else {
+                    "Page 2 of 3. Find or jump to a chapter or search."
+                },
+            )
             assertNotNull("Next advances to page two", device.wait(Until.findObject(pageTwo), 5_000))
             assertTrue("The next bounded chapter slice is visible", device.hasObject(By.text("Chapter 101")))
+            nextButton.click()
+            val pageThree = By.desc(
+                if (uiVariant == "revised") {
+                    "Page 3 of 3. Chapters 201 to 250 of 250. Find or jump to a chapter or search."
+                } else {
+                    "Page 3 of 3. Find or jump to a chapter or search."
+                },
+            )
+            assertNotNull("Next reaches the last page", device.wait(Until.findObject(pageThree), 5_000))
+            assertTrue("Last page disables Next", !requireNotNull(device.findObject(By.desc("Next page"))).isEnabled)
+            requireNotNull(device.findObject(By.desc("Previous page"))).click()
+            assertNotNull("Previous returns to page two", device.wait(Until.findObject(pageTwo), 5_000))
 
             requireNotNull(device.findObject(pageTwo)).click()
             val searchFields = device.wait(Until.findObjects(By.clazz("android.widget.EditText")), 5_000)
             assertTrue("Page indicator opens search and jump", searchFields.size >= 2)
-            searchFields[0].text = "title-does-not-exist"
+            searchFields[0].text = "Chapter 250"
             device.pressBack()
             click("Done")
-            val noMatches = By.desc("No matches. Search or jump to a chapter.")
+            val singlePage = By.desc(
+                if (uiVariant == "revised") {
+                    "Page 1 of 1. Chapters 1 to 1 of 1. Search filter: Chapter 250. Find or jump to a chapter or search."
+                } else {
+                    "Page 1 of 1. Find or jump to a chapter or search."
+                },
+            )
+            assertNotNull("Single matching chapter uses a single-page state", device.wait(Until.findObject(singlePage), 5_000))
+            assertTrue("Single-page search disables Previous", !requireNotNull(device.findObject(By.desc("Previous page"))).isEnabled)
+            assertTrue("Single-page search disables Next", !requireNotNull(device.findObject(By.desc("Next page"))).isEnabled)
+            requireNotNull(device.findObject(singlePage)).click()
+            val emptySearchFields = device.wait(Until.findObjects(By.clazz("android.widget.EditText")), 5_000)
+            emptySearchFields[0].text = "title-does-not-exist"
+            device.pressBack()
+            click("Done")
+            val noMatches = By.desc(
+                if (uiVariant == "revised") {
+                    "No matches for title-does-not-exist. Search or jump to a chapter."
+                } else {
+                    "No matches. Search or jump to a chapter."
+                },
+            )
             assertNotNull("No-match state keeps search and jump reachable", device.wait(Until.findObject(noMatches), 5_000))
             requireNotNull(device.findObject(noMatches)).click()
             assertNotNull("The no-match action reopens the search dialog", device.wait(Until.findObject(By.text("Find or jump to chapter")), 5_000))
+
+            requireNotNull(scenario).onActivity { activity ->
+                activity.setContentView(ComposeView(activity).apply {
+                    setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                    setContent {
+                        val density = LocalDensity.current
+                        CompositionLocalProvider(
+                            LocalNovelSources provides repository.sources,
+                            LocalDensity provides Density(density.density, fontScale = 2f),
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                                Box(Modifier.width(320.dp).fillMaxHeight()) {
+                                    Navigator(screen = NovelDetailScreen(sourceId, path)) { navigator ->
+                                        DefaultNavigatorScreenTransition(navigator)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })
+            }
+            val largeFontTitle = device.wait(Until.findObject(By.desc(title)), 12_000)
+            assertNotNull("Novel title remains accessible at 320dp/2.0x", largeFontTitle)
+            assertTrue("Capture the 2.0x responsive novel hero", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-long-title-2.0x-$uiVariant.png")))
+            val pageOneLargeFont = By.desc(
+                if (uiVariant == "revised") {
+                    "Page 1 of 3. Chapters 1 to 100 of 250. Find or jump to a chapter or search."
+                } else {
+                    "Page 1 of 3. Find or jump to a chapter or search."
+                },
+            )
+            for (attempt in 0 until 18) {
+                if (device.hasObject(pageOneLargeFont)) break
+                device.swipe(device.displayWidth / 2, (device.displayHeight * .78).toInt(), device.displayWidth / 2,
+                    (device.displayHeight * .57).toInt(), 20)
+            }
+            val largeFontPager = requireNotNull(device.wait(Until.findObject(pageOneLargeFont), 5_000))
+            val largeFontDensity = context.resources.displayMetrics.density
+            assertTrue("2.0x page jump target remains at least 48dp", largeFontPager.visibleBounds.height() >= (48 * largeFontDensity).toInt())
+            assertTrue("2.0x pager stays inside 320dp width", largeFontPager.visibleBounds.left >= (device.displayWidth - (320 * largeFontDensity).toInt()) / 2)
+            assertTrue("Capture the novel pager at 320dp/2.0x", device.takeScreenshot(File(context.cacheDir, "qa-novel-detail-pager-320dp-2.0x-$uiVariant.png")))
         } finally {
             scenario?.close()
             novelId?.let { repository.remove(it) }
