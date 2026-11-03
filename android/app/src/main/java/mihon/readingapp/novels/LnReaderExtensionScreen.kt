@@ -23,7 +23,10 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.util.Screen
 import kotlinx.coroutines.launch
+import mihon.app.di.appGraph
 import mihon.readingapp.design.Ink
+import mihon.readingapp.library.SmartOfflineOriginReview
+import mihon.readingapp.library.SmartOfflinePolicy
 import mihon.readingapp.settings.ArkhiveSettingsHeader
 import mihon.readingapp.settings.InkSettingsTheme
 import mihon.readingapp.novels.lnreader.LnReaderInstallReview
@@ -38,12 +41,20 @@ class NovelExtensionsScreen(
     private val suggestedCoverOrigin: String? = null,
     private val suggestedSourceId: String? = null,
     private val closeOnExit: Boolean = false,
+    private val expectedBundleSha256: String? = null,
+    private val smartSeriesKey: String? = null,
+    private val expectedInstalledAt: Long? = null,
+    private val expectedApprovedOrigins: Set<String>? = null,
 ) : Screen() {
     @Composable override fun Content() = LnReaderExtensionManagement(
         showHeader = true,
         suggestedCoverOrigin = suggestedCoverOrigin,
         suggestedSourceId = suggestedSourceId,
         closeOnExit = closeOnExit,
+        expectedBundleSha256 = expectedBundleSha256,
+        smartSeriesKey = smartSeriesKey,
+        expectedInstalledAt = expectedInstalledAt,
+        expectedApprovedOrigins = expectedApprovedOrigins,
     )
 }
 
@@ -52,6 +63,10 @@ class NovelExtensionsScreen(
     suggestedCoverOrigin: String? = null,
     suggestedSourceId: String? = null,
     closeOnExit: Boolean = false,
+    expectedBundleSha256: String? = null,
+    smartSeriesKey: String? = null,
+    expectedInstalledAt: Long? = null,
+    expectedApprovedOrigins: Set<String>? = null,
 ) = InkSettingsTheme {
     val nav = LocalNavigator.currentOrThrow
     val context = LocalContext.current
@@ -67,6 +82,44 @@ class NovelExtensionsScreen(
     var selectedSuggestedOrigins by remember { mutableStateOf<Set<String>>(emptySet()) }
     val safeSuggestedCoverOrigin = remember(suggestedCoverOrigin) {
         suggestedCoverOrigin?.let { runCatching { normalizePublicHttpsOrigin(it) }.getOrNull() }
+    }
+    val expectedSmartOriginReview = remember(
+        smartSeriesKey,
+        suggestedSourceId,
+        expectedBundleSha256,
+        expectedInstalledAt,
+        expectedApprovedOrigins,
+        safeSuggestedCoverOrigin,
+    ) {
+        if (smartSeriesKey == null || suggestedSourceId == null || expectedBundleSha256 == null ||
+            expectedInstalledAt == null || expectedApprovedOrigins == null || safeSuggestedCoverOrigin == null
+        ) null else SmartOfflineOriginReview(
+            seriesKey = smartSeriesKey,
+            sourceId = suggestedSourceId,
+            bundleSha256 = expectedBundleSha256,
+            installedAt = expectedInstalledAt,
+            enabled = true,
+            approvedOrigins = expectedApprovedOrigins,
+            origin = safeSuggestedCoverOrigin,
+        )
+    }
+    fun smartReviewContextIsCurrent(): Boolean {
+        if (smartSeriesKey == null) return true
+        val expected = expectedSmartOriginReview ?: return false
+        val graph = context.appGraph
+        val novel = graph.novelRepository.state.value.novels.firstOrNull { it.id == smartSeriesKey.removePrefix("novel:") }
+        val installedNow = manager.currentInstalled(expected.sourceId)
+        return graph.smartOfflineStore.state.value.originReview == expected &&
+            SmartOfflinePolicy.canReviewOrigin(
+                review = expected,
+                hiddenSeries = graph.libraryVisibility.hiddenSeries.get(),
+                favoriteSourceId = novel?.takeIf { it.favorite }?.sourceId,
+                smartRuleEnabled = graph.libraryToolsStore.state.value.smartOffline[smartSeriesKey]?.enabled == true,
+                installedEnabled = installedNow?.enabled == true,
+                installedBundleSha256 = installedNow?.sha256,
+                installedAt = installedNow?.installedAt,
+                approvedOrigins = installedNow?.approvedOrigins,
+            )
     }
     val normalizedAdditionalOrigins = remember(extraOrigins) {
         runCatching { normalizePublicHttpsOriginLines(extraOrigins) }
@@ -133,10 +186,31 @@ class NovelExtensionsScreen(
                             canReview = canReview,
                             onReview = {
                                 scope.launch {
-                                    runCatching { manager.stagePlugin(repository, metadata.id) }.onSuccess {
-                                        review = it
+                                    if (!smartReviewContextIsCurrent()) {
+                                        error = "This Smart Offline review is no longer current. Return to Downloads and review the latest blocked origin."
+                                        return@launch
+                                    }
+                                    val sourceId = suggestedSourceId ?: return@launch
+                                    val current = manager.currentInstalled(sourceId)
+                                    if (expectedBundleSha256 != null &&
+                                        (current?.sha256 != expectedBundleSha256 || current.installedAt != expectedInstalledAt ||
+                                            current.enabled != true || current.approvedOrigins != expectedApprovedOrigins)
+                                    ) {
+                                        error = "This source bundle changed since Smart offline detected the blocked origin. Return to Downloads and retry the review from the current source state."
+                                        return@launch
+                                    }
+                                    runCatching { manager.stagePlugin(repository, metadata.id) }.onSuccess { staged ->
+                                        if (!smartReviewContextIsCurrent() || expectedBundleSha256 != null &&
+                                            (staged.existingSha256 != expectedBundleSha256 || staged.existingInstalledAt != expectedInstalledAt ||
+                                                staged.existingEnabled != true || staged.existingApprovedOrigins != expectedApprovedOrigins)
+                                        ) {
+                                            manager.discardReview(staged.reviewToken)
+                                            error = "This source bundle changed during review. Return to Downloads and retry from the current source state."
+                                            return@onSuccess
+                                        }
+                                        review = staged
                                         extraOrigins = ""
-                                        selectedExistingOrigins = it.existingApprovedOrigins - it.requiredOrigins
+                                        selectedExistingOrigins = staged.existingApprovedOrigins - staged.requiredOrigins
                                         selectedSuggestedOrigins = emptySet()
                                     }.onFailure { error = it.message }
                                 }
@@ -234,12 +308,35 @@ class NovelExtensionsScreen(
                     pending.existingApprovedOrigins.intersect(selectedExistingOrigins) +
                     normalizedAdditionalOrigins.getOrThrow() + selectedSuggestedOrigins
                 scope.launch {
+                    if (!smartReviewContextIsCurrent()) {
+                        review = null
+                        selectedExistingOrigins = emptySet()
+                        selectedSuggestedOrigins = emptySet()
+                        runCatching { manager.discardReview(pending.reviewToken) }
+                        error = "This Smart Offline review is no longer current. Return to Downloads and review the latest blocked origin."
+                        return@launch
+                    }
                     runCatching { manager.installReviewed(pending.reviewToken, pending.sha256, origins) }
-                        .onSuccess {
+                        .onSuccess { installed ->
                             review = null
                             selectedExistingOrigins = emptySet()
                             selectedSuggestedOrigins = emptySet()
                             error = "${pending.metadata.name} is installed. It can now be opened from novel sources."
+                            val reviewOrigin = safeSuggestedCoverOrigin
+                                ?.takeIf { pending.sourceId == suggestedSourceId && it in installed.approvedOrigins }
+                            if (smartSeriesKey != null && expectedBundleSha256 != null && reviewOrigin != null) {
+                                context.appGraph.smartOfflineStore.clearOriginReview(
+                                    SmartOfflineOriginReview(
+                                        seriesKey = smartSeriesKey,
+                                        sourceId = pending.sourceId,
+                                        bundleSha256 = expectedBundleSha256,
+                                        installedAt = requireNotNull(expectedInstalledAt),
+                                        enabled = true,
+                                        approvedOrigins = requireNotNull(expectedApprovedOrigins),
+                                        origin = reviewOrigin,
+                                    ),
+                                )
+                            }
                         }
                         .onFailure { failure ->
                             review = null

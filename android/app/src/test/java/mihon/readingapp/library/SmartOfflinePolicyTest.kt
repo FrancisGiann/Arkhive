@@ -1,6 +1,7 @@
 package mihon.readingapp.library
 
 import eu.kanade.tachiyomi.data.download.SmartOfflineBlockedException
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CountDownLatch
@@ -86,5 +87,80 @@ class SmartOfflinePolicyTest {
         limit = 49
         assertThrows(SmartOfflineBlockedException::class.java) { gate.write(1) {} }
         assertTrue(gate.blockedReason.orEmpty().contains("storage limit"))
+    }
+
+    @Test fun initialAndRedirectOriginBlocksProduceExactReviewContextWithoutGrantingTrust() {
+        val seriesKey = "novel:" + "1".repeat(64)
+        val sourceId = "lnreader." + "a".repeat(32)
+        val bundleSha = "b".repeat(64)
+        val installedAt = 123456L
+        val existingApprovals = mutableSetOf("https://reader.fixture.invalid:443")
+        val beforeApprovals = existingApprovals.toSet()
+        val blockedOrigins = listOf(
+            "https://api.fixture.invalid:443",
+            "https://cdn.fixture.invalid:9443",
+        )
+
+        blockedOrigins.forEach { blockedOrigin ->
+            val context = SmartOfflinePolicy.originReview(
+                seriesKey,
+                sourceId,
+                LnReaderUnapprovedSourceOriginException(blockedOrigin, sourceId, bundleSha, installedAt, true, existingApprovals),
+            )
+            assertEquals(SmartOfflineOriginReview(seriesKey, sourceId, bundleSha, installedAt, true, existingApprovals, blockedOrigin), context)
+            assertTrue(blockedOrigin !in existingApprovals, "Mapping a source error cannot grant an origin")
+        }
+        assertEquals(beforeApprovals, existingApprovals)
+    }
+
+    @Test fun invalidOriginReviewDescriptorsAndStaleContextAreNotActionable() {
+        val seriesKey = "novel:" + "1".repeat(64)
+        val sourceId = "lnreader." + "a".repeat(32)
+        val bundleSha = "b".repeat(64)
+        val invalid = listOf(
+            LnReaderUnapprovedSourceOriginException("http://plain.fixture.invalid:80", sourceId, bundleSha),
+            LnReaderUnapprovedSourceOriginException("https://127.0.0.1:443", sourceId, bundleSha),
+            LnReaderUnapprovedSourceOriginException("https://api.fixture.invalid:443/path", sourceId, bundleSha),
+            LnReaderUnapprovedSourceOriginException("https://api.fixture.invalid:443", "wikisource.en", bundleSha),
+            LnReaderUnapprovedSourceOriginException("https://api.fixture.invalid:443", sourceId, "bad-hash"),
+            LnReaderUnapprovedSourceOriginException("https://api.fixture.invalid:443", sourceId, bundleSha, 123456, true, emptySet()),
+            LnReaderUnapprovedSourceOriginException(
+                "https://reader.fixture.invalid:443", sourceId, bundleSha, 123456, true,
+                setOf("https://reader.fixture.invalid:443"),
+            ),
+        )
+        invalid.forEach { failure ->
+            assertNull(SmartOfflinePolicy.originReview(seriesKey, sourceId, failure))
+        }
+        assertNull(SmartOfflinePolicy.originReview("manga:12", sourceId,
+            LnReaderUnapprovedSourceOriginException("https://api.fixture.invalid:443", sourceId, bundleSha)))
+
+        val installedAt = 123456L
+        val review = SmartOfflineOriginReview(
+            seriesKey, sourceId, bundleSha, installedAt, true, setOf("https://reader.fixture.invalid:443"),
+            "https://api.fixture.invalid:443",
+        )
+        val approvals = setOf("https://reader.fixture.invalid:443")
+        fun visible(
+            hidden: Set<String> = emptySet(),
+            favoriteSource: String? = sourceId,
+            ruleEnabled: Boolean = true,
+            installedEnabled: Boolean = true,
+            installedSha: String? = bundleSha,
+            currentInstalledAt: Long? = installedAt,
+            approved: Set<String>? = approvals,
+        ) = SmartOfflinePolicy.canReviewOrigin(
+            review, hidden, favoriteSource, ruleEnabled, installedEnabled, installedSha, currentInstalledAt, approved,
+        )
+
+        assertTrue(visible())
+        assertFalse(visible(hidden = setOf(seriesKey)))
+        assertFalse(visible(favoriteSource = null))
+        assertFalse(visible(ruleEnabled = false))
+        assertFalse(visible(installedEnabled = false))
+        assertFalse(visible(installedSha = "c".repeat(64)))
+        assertFalse(visible(currentInstalledAt = installedAt + 1))
+        assertFalse(visible(approved = approvals + "https://other.fixture.invalid:443"))
+        assertFalse(visible(approved = approvals + review.origin))
     }
 }

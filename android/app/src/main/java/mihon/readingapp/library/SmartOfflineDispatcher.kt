@@ -25,6 +25,7 @@ import kotlinx.coroutines.withTimeout
 import mihon.app.di.appGraph
 import mihon.readingapp.novels.ChapterState
 import mihon.readingapp.novels.NovelRepository
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.library.service.LibraryVisibility
@@ -141,6 +142,7 @@ class SmartOfflineDispatcher(
     }
 
     suspend fun runBatch() {
+        discardStaleOriginReview()
         if (store.state.value.paused) return status("Smart offline is paused.")
         if (foreground.isActive()) return status("Smart offline waits until all readers leave the foreground.")
         if (!isWifi()) return status("Smart offline waits for Wi-Fi.")
@@ -273,6 +275,21 @@ class SmartOfflineDispatcher(
                     gate.discardItem()
                     stopReason = blocked.message
                     break
+                } catch (blocked: LnReaderUnapprovedSourceOriginException) {
+                    gate.discardItem()
+                    hadFailure = true
+                    val novelCandidate = candidate as? Candidate.NovelChapter
+                    val originReview = novelCandidate?.let {
+                        SmartOfflinePolicy.originReview(seriesKey, it.series.sourceId, blocked)
+                    }
+                    if (originReview != null) {
+                        store.setOriginReview(originReview)
+                        stopReason = "Smart offline stopped because this novel needs an explicit source-origin review."
+                    } else {
+                        stopReason = "Smart offline stopped at a blocked source origin. Review this series' source check before retrying."
+                    }
+                    store.setMessage(stopReason)
+                    break
                 } catch (error: Exception) {
                     gate.discardItem()
                     hadFailure = true
@@ -322,6 +339,35 @@ class SmartOfflineDispatcher(
     private fun isManuallyQueued(candidate: Candidate): Boolean = when (candidate) {
         is Candidate.MangaChapter -> downloadManager.getQueuedDownloadOrNull(candidate.chapter.id) != null
         is Candidate.NovelChapter -> novels.state.value.downloads.any { it.id == candidate.chapterId }
+    }
+
+    private suspend fun discardStaleOriginReview() {
+        val pending = store.state.value.originReview ?: return
+        val clear = { store.clearOriginReview(pending) }
+        if (visibility.isHidden(pending.seriesKey) || tools.state.value.smartOffline[pending.seriesKey]?.enabled != true) {
+            clear()
+            return
+        }
+        val novel = novels.get(pending.seriesKey.removePrefix("novel:"))
+        if (novel == null || !novel.favorite || novel.sourceId != pending.sourceId) {
+            clear()
+            return
+        }
+        val installed = novels.sources.lnReaderExtensions.snapshot().installedPlugins
+            .firstOrNull { it.sourceId == pending.sourceId }
+        if (!SmartOfflinePolicy.canReviewOrigin(
+                review = pending,
+                hiddenSeries = emptySet(),
+                favoriteSourceId = novel.sourceId,
+                smartRuleEnabled = true,
+                installedEnabled = installed?.enabled == true,
+                installedBundleSha256 = installed?.sha256,
+                installedAt = installed?.installedAt,
+                approvedOrigins = installed?.approvedOrigins,
+            )
+        ) {
+            clear()
+        }
     }
 
     private suspend fun currentLastModified(candidate: Candidate): Long? {

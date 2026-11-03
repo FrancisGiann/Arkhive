@@ -55,24 +55,12 @@ class PublicDiscoveryRepository internal constructor(
     private val directory get() = File(context.cacheDir, "arkhive-public-metadata").apply { mkdirs() }
     private data class Payload(val text: String, val fetchedAt: Long, val date: String?, val cached: Boolean,
         val stale: Boolean, val message: String?)
-    fun catalogUrl(query: CatalogQuery, page: Int = 1): HttpUrl {
-        require(page in 1..CatalogPager.MAX_PAGES)
-        if (query.window != CatalogWindow.SUBJECT)
-            return "https://openlibrary.org/trending/${query.window.path}.json".toHttpUrl().newBuilder()
-                .addQueryParameter("limit", "24").apply { if (page > 1) addQueryParameter("page", page.toString()) }.build()
-        val terms = listOfNotNull(query.focus.subject?.let { "subject:$it" }, query.genre.subject?.let { "subject:$it" },
-            query.search.trim().take(120).takeIf(String::isNotBlank)?.let { "\"${it.replace("\\", "\\\\").replace("\"", "\\\"")}\"" })
-        return "https://openlibrary.org/search.json".toHttpUrl().newBuilder()
-            .addQueryParameter("q", terms.joinToString(" AND ").ifBlank { "subject:fiction" })
-            .addQueryParameter("limit", "24")
-            .apply { if (page > 1) addQueryParameter("offset", ((page - 1) * 24).toString()) }
-            .addQueryParameter("fields", "key,title,author_name,cover_i,subject,first_publish_year,edition_key")
-            .build()
-    }
+    fun catalogUrl(query: CatalogQuery, page: Int = 1): HttpUrl = catalogRequestUrl(query.normalized(), page)
     suspend fun catalog(query: CatalogQuery, force: Boolean = false, page: Int = 1): CatalogLoad = try {
-        val url = catalogUrl(query, page)
+        val effectiveQuery = query.normalized()
+        val url = catalogUrl(effectiveQuery, page)
         val data = payload(url, force)
-        val feed = withContext(Dispatchers.Default) { DiscoveryDataPolicy.parseCatalog(data.text, query, url.toString(), data.fetchedAt, data.date, page) }
+        val feed = withContext(Dispatchers.Default) { DiscoveryDataPolicy.parseCatalog(data.text, effectiveQuery, url.toString(), data.fetchedAt, data.date, page) }
         CatalogLoad(feed, data.cached, data.stale, data.message)
     } catch (cancelled: CancellationException) { throw cancelled }
       catch (error: Exception) { CatalogLoad(null, message = error.message ?: "Catalog information is unavailable. Try again later.") }

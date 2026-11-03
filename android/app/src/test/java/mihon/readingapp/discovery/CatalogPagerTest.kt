@@ -45,6 +45,18 @@ class CatalogPagerTest {
         pager.select(CatalogQuery(search = "new")); advanceUntilIdle()
         assertEquals("new", pager.state.value.query.search); assertEquals(listOf("/works/OL50W", "/works/OL51W"), pager.state.value.titles.map { it.key })
     }
+    @Test fun mediumIsPartOfQueryIdentityAndCancelsOldResults() = runTest {
+        val requests = mutableListOf<CatalogQuery>()
+        val pager = CatalogPager(this) { q, p, _ ->
+            requests += q
+            page(p, if (q.medium == CatalogMedium.COMICS) 50..51 else 1..2, null)
+        }
+        pager.select(CatalogQuery(focus = CatalogFocus.MANHWA)); runCurrent()
+        pager.select(CatalogQuery(focus = CatalogFocus.MANHWA, medium = CatalogMedium.COMICS)); advanceUntilIdle()
+        assertEquals(CatalogMedium.COMICS, pager.state.value.query.medium)
+        assertEquals(listOf(CatalogMedium.ALL_BOOKS, CatalogMedium.COMICS), requests.map { it.medium })
+        assertEquals(listOf("/works/OL50W", "/works/OL51W"), pager.state.value.titles.map { it.key })
+    }
     @Test fun returningToSameQueryRetainsPagesAndViewport() = runTest {
         var calls = 0
         val pager = CatalogPager(this) { _, p, _ -> calls++; page(p, 1..24, 2) }

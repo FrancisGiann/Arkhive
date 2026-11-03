@@ -1,5 +1,8 @@
 package mihon.readingapp.library
 
+import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
+import mihon.readingapp.novels.lnreader.normalizePublicHttpsOrigin
+
 /** Bounded identity helpers shared by the dispatcher and its JVM tests. */
 object SmartOfflinePolicy {
     data class Candidate(
@@ -10,6 +13,46 @@ object SmartOfflinePolicy {
         val downloaded: Boolean,
         val manuallyQueued: Boolean,
     )
+
+    /**
+     * Keep source-origin recovery tied to a real LNReader novel and the exact installed bundle
+     * that raised the block. This records a review route only; it never changes trust.
+     */
+    fun originReview(
+        seriesKey: String,
+        expectedSourceId: String,
+        failure: LnReaderUnapprovedSourceOriginException,
+    ): SmartOfflineOriginReview? {
+        val sourceId = failure.sourceId ?: return null
+        val bundleSha256 = failure.bundleSha256 ?: return null
+        if (sourceId != expectedSourceId || !sourceId.matches(Regex("lnreader\\.[a-f0-9]{32}"))) return null
+        if (!seriesKey.startsWith("novel:") || !LibraryToolsPolicy.validKey(seriesKey)) return null
+        if (!bundleSha256.matches(Regex("[a-f0-9]{64}"))) return null
+        val installedAt = failure.installedAt ?: return null
+        val enabled = failure.sourceEnabled ?: return null
+        val approvedOrigins = failure.approvedOrigins ?: return null
+        if (!enabled || installedAt < 0 || approvedOrigins.isEmpty() || approvedOrigins.size > 24) return null
+        if (approvedOrigins.any { runCatching { normalizePublicHttpsOrigin(it) != it }.getOrDefault(true) }) return null
+        val origin = runCatching { normalizePublicHttpsOrigin(failure.origin) }.getOrNull() ?: return null
+        if (origin != failure.origin || origin in approvedOrigins) return null
+        return SmartOfflineOriginReview(seriesKey, sourceId, bundleSha256, installedAt, enabled, approvedOrigins.toSet(), origin)
+    }
+
+    fun canReviewOrigin(
+        review: SmartOfflineOriginReview,
+        hiddenSeries: Set<String>,
+        favoriteSourceId: String?,
+        smartRuleEnabled: Boolean,
+        installedEnabled: Boolean,
+        installedBundleSha256: String?,
+        installedAt: Long?,
+        approvedOrigins: Set<String>?,
+    ): Boolean = review.seriesKey !in hiddenSeries &&
+        favoriteSourceId == review.sourceId && smartRuleEnabled && installedEnabled &&
+        review.enabled && installedBundleSha256 == review.bundleSha256 && installedAt == review.installedAt &&
+        approvedOrigins == review.approvedOrigins &&
+        approvedOrigins != null &&
+        review.origin !in approvedOrigins
 
     fun <T> fairWindow(values: List<T>, cursor: String?, limit: Int, key: (T) -> String): List<T> {
         require(limit > 0)

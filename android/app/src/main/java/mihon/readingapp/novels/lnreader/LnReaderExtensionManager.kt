@@ -45,9 +45,26 @@ class LnReaderUnapprovedCoverOriginException internal constructor(
     "This cover needs the exact origin $origin. Add this thumbnail origin to the currently installed, reviewed source to retry the image.",
 )
 
-class LnReaderUnapprovedSourceOriginException(val origin: String) : IllegalArgumentException(
+class LnReaderUnapprovedSourceOriginException(
+    val origin: String,
+    val sourceId: String? = null,
+    val bundleSha256: String? = null,
+    val installedAt: Long? = null,
+    val sourceEnabled: Boolean? = null,
+    val approvedOrigins: Set<String>? = null,
+) : IllegalArgumentException(
     "This source requested the unreviewed HTTPS origin $origin. Select this exact origin during extension review; DNS and public-address checks still run before any connection.",
-)
+) {
+    internal fun withSourceSnapshot(installed: LnReaderInstalledPlugin) =
+        LnReaderUnapprovedSourceOriginException(
+            origin = origin,
+            sourceId = installed.sourceId,
+            bundleSha256 = installed.sha256,
+            installedAt = installed.installedAt,
+            sourceEnabled = installed.enabled,
+            approvedOrigins = installed.approvedOrigins.toSet(),
+        ).also { it.initCause(this) }
+}
 
 /**
  * Private, explicit-review repository and plugin state. Listing metadata never evaluates code;
@@ -354,28 +371,45 @@ class LnReaderExtensionManager(
                 activeExecutions.getOrPut(sourceId) { linkedSetOf() }.add(executionJob)
                 Triple(current, bytes, storage)
             }
-            val result = runtime.execute(
-                pluginId = installed.metadata.id,
-                pluginName = installed.metadata.name,
-                pluginSite = installed.metadata.site,
-                pluginVersion = installed.metadata.version,
-                bundle = bundle,
-                operation = operation,
-                arguments = arguments,
-                approvedOrigins = installed.approvedOrigins,
-                storage = stored,
-                webStorageUtilized = installed.metadata.webStorageUtilized,
-                authorizationCheck = {
-                    stateLock.withLock {
-                        ensureLoaded()
-                        state.installed[sourceId]?.let { current ->
-                            current.enabled && current.sha256 == installed.sha256 &&
-                                current.approvedOrigins == installed.approvedOrigins &&
-                                current.repositoryUrl == installed.repositoryUrl && current.metadata == installed.metadata
-                        } == true
-                    }
-                },
-            )
+            val result = try {
+                runtime.execute(
+                    pluginId = installed.metadata.id,
+                    pluginName = installed.metadata.name,
+                    pluginSite = installed.metadata.site,
+                    pluginVersion = installed.metadata.version,
+                    bundle = bundle,
+                    operation = operation,
+                    arguments = arguments,
+                    approvedOrigins = installed.approvedOrigins,
+                    storage = stored,
+                    webStorageUtilized = installed.metadata.webStorageUtilized,
+                    authorizationCheck = {
+                        stateLock.withLock {
+                            ensureLoaded()
+                            state.installed[sourceId]?.let { current ->
+                                current.enabled && current.sha256 == installed.sha256 &&
+                                    current.approvedOrigins == installed.approvedOrigins &&
+                                    current.repositoryUrl == installed.repositoryUrl && current.metadata == installed.metadata &&
+                                    current.installedAt == installed.installedAt
+                            } == true
+                        }
+                    },
+                )
+            } catch (failure: LnReaderUnapprovedSourceOriginException) {
+                // Preserve actionable origin context only while the exact trust snapshot that
+                // ran the extension is still current. The caller still needs explicit review.
+                val unchanged = stateLock.withLock {
+                    ensureLoaded()
+                    state.installed[sourceId]?.let { current ->
+                        current.enabled && current.sha256 == installed.sha256 &&
+                            current.approvedOrigins == installed.approvedOrigins &&
+                            current.repositoryUrl == installed.repositoryUrl && current.metadata == installed.metadata &&
+                            current.installedAt == installed.installedAt
+                    } == true
+                }
+                if (unchanged) throw failure.withSourceSnapshot(installed)
+                throw failure
+            }
             require(result.storageSize() <= MAX_STORAGE_BYTES) { "Plugin storage exceeds its 64 KiB limit." }
             stateLock.withLock {
                 ensureLoaded()
@@ -383,7 +417,8 @@ class LnReaderExtensionManager(
                 check(latest?.let { current ->
                     current.enabled && current.sha256 == installed.sha256 &&
                         current.approvedOrigins == installed.approvedOrigins &&
-                        current.repositoryUrl == installed.repositoryUrl && current.metadata == installed.metadata
+                        current.repositoryUrl == installed.repositoryUrl && current.metadata == installed.metadata &&
+                        current.installedAt == installed.installedAt
                 } == true) {
                     "This LNReader source was disabled or removed while the operation was running."
                 }

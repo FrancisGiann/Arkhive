@@ -21,6 +21,7 @@ import mihon.app.di.appGraph
 import mihon.readingapp.novels.LnReaderNovelSource
 import mihon.readingapp.novels.NovelRepository
 import mihon.readingapp.novels.NovelSources
+import mihon.readingapp.library.SmartOfflinePolicy
 import mihon.readingapp.novels.lnreader.LnReaderUnapprovedCoverOriginException
 import mihon.readingapp.novels.lnreader.LnReaderUnapprovedSourceOriginException
 import org.junit.Assert.assertEquals
@@ -89,10 +90,39 @@ class LnReaderNovelAdapterRuntimeTest {
             val cdnOrigin = "https://cdn.fixture.invalid:443"
             val blockedCatalog = runCatching { source.catalog(1, "") }.exceptionOrNull()
             assertTrue("The source API stays blocked until a separate origin review.", blockedCatalog is LnReaderUnapprovedSourceOriginException)
-            assertEquals(apiOrigin, (blockedCatalog as LnReaderUnapprovedSourceOriginException).origin)
+            val blockedCatalogError = blockedCatalog as LnReaderUnapprovedSourceOriginException
+            assertEquals(apiOrigin, blockedCatalogError.origin)
+            assertEquals(installed.sourceId, blockedCatalogError.sourceId)
+            assertEquals(installed.sha256, blockedCatalogError.bundleSha256)
+            assertEquals(installed.installedAt, blockedCatalogError.installedAt)
+            assertEquals(installed.enabled, blockedCatalogError.sourceEnabled)
+            assertEquals(installed.approvedOrigins, blockedCatalogError.approvedOrigins)
+            assertFalse("An observed catalog origin is not granted by Smart recovery context.", apiOrigin in installed.approvedOrigins)
+            assertEquals(apiOrigin, requireNotNull(SmartOfflinePolicy.originReview(
+                "novel:" + "e".repeat(64), installed.sourceId, blockedCatalogError,
+            )).origin)
             val apiReview = manager.stagePlugin(repositoryUrl, "fixture-adapter")
             assertTrue(installed.approvedOrigins.containsAll(apiReview.existingApprovedOrigins))
             manager.installReviewed(apiReview.reviewToken, apiReview.sha256, apiReview.requiredOrigins + apiOrigin)
+            val installedAfterApiReview = requireNotNull(manager.currentInstalled(installed.sourceId))
+
+            val redirectedChapterOrigin = "https://chapter-cdn.fixture.invalid:9443"
+            fixture.blockedChapterRedirectOrigin = redirectedChapterOrigin
+            val blockedChapter = runCatching { source.chapter("origin-review-chapter") }.exceptionOrNull()
+            assertTrue("A redirect-origin block from chapter fetch remains typed.", blockedChapter is LnReaderUnapprovedSourceOriginException)
+            val blockedChapterError = blockedChapter as LnReaderUnapprovedSourceOriginException
+            assertEquals(redirectedChapterOrigin, blockedChapterError.origin)
+            assertEquals(installed.sourceId, blockedChapterError.sourceId)
+            assertEquals(installedAfterApiReview.sha256, blockedChapterError.bundleSha256)
+            assertEquals(installedAfterApiReview.installedAt, blockedChapterError.installedAt)
+            assertEquals(installedAfterApiReview.approvedOrigins, blockedChapterError.approvedOrigins)
+            val smartReview = requireNotNull(SmartOfflinePolicy.originReview(
+                "novel:" + "f".repeat(64), installed.sourceId, blockedChapterError,
+            ))
+            assertEquals(redirectedChapterOrigin, smartReview.origin)
+            assertFalse("Creating Smart recovery context does not grant the destination.",
+                redirectedChapterOrigin in requireNotNull(manager.currentInstalled(installed.sourceId)).approvedOrigins)
+            fixture.blockedChapterRedirectOrigin = null
 
             val catalog = source.catalog(1, "")
             assertEquals(500, catalog.items.size)
@@ -229,6 +259,7 @@ class LnReaderNovelAdapterRuntimeTest {
 
     private class AdapterTransport : LnReaderHostFetch {
         val pluginRequests = AtomicInteger()
+        @Volatile var blockedChapterRedirectOrigin: String? = null
         private val catalogRows = 500
         private val manifest = """[
           {"id":"fixture-adapter","name":"Authored adapter","site":"https://fixture.invalid/","lang":"en","version":"1.0","url":"https://fixture.invalid/plugin.js"}
@@ -248,6 +279,12 @@ class LnReaderNovelAdapterRuntimeTest {
             }
             if (request.url.contains("cdn.fixture.invalid")) {
                 assertTrue("Image traffic is sent only after explicit review.", "https://cdn.fixture.invalid:443" in allowedOrigins)
+            }
+            if (request.url.endsWith("/chapter")) {
+                blockedChapterRedirectOrigin?.let { origin ->
+                    assertTrue("The controlled redirect destination remains outside the grant set.", origin !in allowedOrigins)
+                    throw LnReaderUnapprovedSourceOriginException(origin)
+                }
             }
             assertFalse(request.headers.keys.any { it.equals("cookie", true) || it.equals("authorization", true) })
             if (request.url.endsWith("/cover.png")) {

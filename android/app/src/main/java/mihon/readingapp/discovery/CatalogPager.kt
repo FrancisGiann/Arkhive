@@ -33,10 +33,11 @@ class CatalogPager(private val scope: CoroutineScope,
     var scrollIndex = 0
     var scrollOffset = 0
     fun select(query: CatalogQuery, force: Boolean = false) {
-        if (!force && mutable.value.query == query && (mutable.value.result != null || mutable.value.loading)) return
+        val effectiveQuery = query.normalized()
+        if (!force && mutable.value.query == effectiveQuery && (mutable.value.result != null || mutable.value.loading)) return
         job?.cancel(); generation++
         scrollIndex = 0; scrollOffset = 0
-        mutable.value = CatalogPagingState(query)
+        mutable.value = CatalogPagingState(effectiveQuery)
         loadNext(force)
     }
     fun pause() { job?.cancel(); generation++; mutable.value = mutable.value.copy(loading = false) }

@@ -23,11 +23,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -54,6 +57,7 @@ data class MangaRelatedDiscoveryScreen(
     val focusName: String,
     val genreName: String,
     val provenance: String,
+    val mediumName: String = CatalogMedium.ALL_BOOKS.name,
 ) : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
@@ -69,6 +73,7 @@ data class MangaRelatedDiscoveryScreen(
             genre = runCatching { CatalogGenre.valueOf(genreName) }.getOrDefault(CatalogGenre.ANY),
             window = CatalogWindow.SUBJECT,
             search = "",
+            medium = runCatching { CatalogMedium.valueOf(mediumName) }.getOrDefault(CatalogMedium.ALL_BOOKS),
         )
         Scaffold(
             topBar = {
@@ -108,11 +113,13 @@ data class MangaRelatedDiscoveryScreen(
     val focusManager = LocalFocusManager.current
     val pager = pagerOverride ?: graph.publicDiscoveryRepository.browsing
     val paging by pager.state.collectAsStateWithLifecycle()
-    var focus by rememberSaveable(initialQuery) { mutableStateOf(initialQuery?.focus ?: paging.query.focus) }
-    var genre by rememberSaveable(initialQuery) { mutableStateOf(initialQuery?.genre ?: paging.query.genre) }
-    var window by rememberSaveable(initialQuery) { mutableStateOf(initialQuery?.window ?: paging.query.window) }
-    var text by rememberSaveable(initialQuery) { mutableStateOf(initialQuery?.search ?: paging.query.search) }
-    var submitted by rememberSaveable(initialQuery) { mutableStateOf(initialQuery?.search ?: paging.query.search) }
+    val startingQuery = CatalogFilterPolicy.normalize(initialQuery ?: paging.query)
+    var focus by rememberSaveable(initialQuery) { mutableStateOf(startingQuery.focus) }
+    var genre by rememberSaveable(initialQuery) { mutableStateOf(startingQuery.genre) }
+    var window by rememberSaveable(initialQuery) { mutableStateOf(startingQuery.window) }
+    var medium by rememberSaveable(initialQuery) { mutableStateOf(startingQuery.medium) }
+    var text by rememberSaveable(initialQuery) { mutableStateOf(startingQuery.search) }
+    var submitted by rememberSaveable(initialQuery) { mutableStateOf(startingQuery.search) }
     var refresh by remember { mutableIntStateOf(0) }
     var consumedRefresh by rememberSaveable { mutableIntStateOf(0) }
     var editionRequest by remember { mutableIntStateOf(0) }
@@ -126,9 +133,14 @@ data class MangaRelatedDiscoveryScreen(
     var editions by remember { mutableStateOf<List<CatalogEdition>?>(null) }
     var editionError by remember { mutableStateOf<String?>(null) }
     var findingEditions by remember { mutableStateOf(false) }
-    val query = CatalogQuery(focus, genre, window, submitted)
+    val query = CatalogFilterPolicy.normalize(CatalogQuery(focus, genre, window, submitted, medium))
     LaunchedEffect(active, query, refresh) {
         if (!active) { pager.pause(); return@LaunchedEffect }
+        if (focus != query.focus) focus = query.focus
+        if (genre != query.genre) genre = query.genre
+        if (window != query.window) window = query.window
+        if (medium != query.medium) medium = query.medium
+        if (submitted != query.search) submitted = query.search
         val changed = query != paging.query
         val force = refresh != consumedRefresh
         consumedRefresh = refresh
@@ -203,11 +215,7 @@ data class MangaRelatedDiscoveryScreen(
                     InkPill("Filters") { focusManager.clearFocus(); filtersOpen = true }
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(when (window) {
-                        CatalogWindow.SUBJECT -> listOfNotNull(focus.label, genre.label.takeIf { genre != CatalogGenre.ANY }).joinToString(" · ")
-                        CatalogWindow.WEEK -> "7-day trends · all books"
-                        CatalogWindow.MONTH -> "30-day trends · all books"
-                    }, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                    Text(CatalogFilterPolicy.appliedSummary(query), style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
                     TextButton(onClick = { sourceInfoOpen = true }) { Text("Source") }
                 }
                 if (result?.stale == true) Text("Saved results · updates unavailable", style = MaterialTheme.typography.bodySmall,
@@ -252,26 +260,132 @@ data class MangaRelatedDiscoveryScreen(
 
     }
     if (filtersOpen) {
-        var draftFocus by remember { mutableStateOf(focus) }
-        var draftGenre by remember { mutableStateOf(genre) }
-        var draftWindow by remember { mutableStateOf(window) }
-        AlertDialog(onDismissRequest = { filtersOpen = false }, title = { Text("Filters") }, text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    CatalogWindow.entries.forEach { choice -> FilterChip(draftWindow == choice, { draftWindow = choice }, label = { Text(choice.label) }) }
+        var editor by remember { mutableStateOf(CatalogFilterPolicy.beginDraft(query)) }
+        val draft = editor.query
+        val dialogSurface = MaterialTheme.colorScheme.surfaceContainerHigh
+        val dialogText = inkReadableForeground(Ink.Text, dialogSurface)
+        val dialogMuted = inkReadableForeground(Ink.Muted, dialogSurface)
+        val dialogLink = inkReadableForeground(Ink.Link, dialogSurface)
+        AlertDialog(
+            onDismissRequest = { filtersOpen = false },
+            containerColor = dialogSurface,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Filters", Modifier.weight(1f))
+                    TextButton(
+                        onClick = { editor = CatalogFilterPolicy.resetDraft(editor) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = dialogText),
+                    ) { Text("Reset") }
                 }
-                if (draftWindow == CatalogWindow.SUBJECT) {
-                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        CatalogFocus.entries.forEach { choice -> FilterChip(draftFocus == choice, { draftFocus = choice }, label = { Text(choice.label) }) }
+            },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val savedFacetSummary = CatalogFilterPolicy.savedSubjectFacetSummary(draft)
+                    Text(
+                        if (draft.window == CatalogWindow.SUBJECT) {
+                            "Selected: Genres · $savedFacetSummary"
+                        } else {
+                            "Selected: ${draft.window.label} trends · saved for Genres: $savedFacetSummary"
+                        },
+                        color = dialogText,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "Swipe each filter row to see more choices.",
+                        color = dialogMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    FilterOptionGroup("Feed", dialogSurface) {
+                        CatalogWindow.entries.forEach { choice ->
+                            FilterChip(
+                                selected = draft.window == choice,
+                                onClick = {
+                                    editor = CatalogFilterPolicy.draftWindow(editor, choice, text.trim())
+                                },
+                                enabled = CatalogFilterPolicy.canSelectWindow(choice, text.trim()),
+                                label = { Text(choice.label) },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                        }
                     }
-                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        CatalogGenre.entries.forEach { choice -> FilterChip(draftGenre == choice, { draftGenre = choice }, label = { Text(choice.label) }) }
+                    if (draft.window == CatalogWindow.SUBJECT) {
+                        FilterOptionGroup("Category", dialogSurface) {
+                            CatalogMedium.entries.forEach { choice ->
+                                FilterChip(
+                                    selected = draft.medium == choice,
+                                    onClick = {
+                                        editor = CatalogFilterPolicy.draftMedium(editor, choice)
+                                    },
+                                    label = { Text(choice.label) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                )
+                            }
+                        }
+                        FilterOptionGroup("Type", dialogSurface) {
+                            FilterChip(
+                                selected = draft.focus == CatalogFocus.ALL || draft.focus == CatalogFocus.COMICS,
+                                onClick = { editor = CatalogFilterPolicy.draftFocus(editor, CatalogFocus.ALL) },
+                                label = { Text("Any type") },
+                                modifier = Modifier.heightIn(min = 48.dp),
+                            )
+                            CatalogFocus.entries.filterNot { it == CatalogFocus.ALL || it == CatalogFocus.COMICS }.forEach { choice ->
+                                FilterChip(
+                                    selected = draft.focus == choice,
+                                    onClick = { editor = CatalogFilterPolicy.draftFocus(editor, choice) },
+                                    enabled = CatalogFilterPolicy.canSelectFocus(draft.medium, choice),
+                                    label = { Text(choice.label) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                )
+                            }
+                        }
+                        FilterOptionGroup("Genre", dialogSurface) {
+                            CatalogGenre.entries.forEach { choice ->
+                                FilterChip(
+                                    selected = draft.genre == choice,
+                                    onClick = { editor = CatalogFilterPolicy.draftGenre(editor, choice) },
+                                    label = { Text(choice.label) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                )
+                            }
+                        }
+                    } else {
+                        Text(
+                            "Trending rankings cover all categories. Type and genre choices stay saved but are not applied; selecting Genres restores them.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = dialogMuted,
+                        )
+                        if (text.trim().isNotEmpty()) {
+                            Text(
+                                "A title search cannot be combined with trends. Applying the search switches this query to Genres.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = dialogLink,
+                            )
+                        }
                     }
-                } else Text("Trends cover Open Library's entire catalog.", style = MaterialTheme.typography.bodySmall)
-            }
-        }, confirmButton = { TextButton(onClick = {
-            focus = draftFocus; genre = draftGenre; window = draftWindow; submitted = text.trim(); filtersOpen = false
-        }) { Text("Apply") } }, dismissButton = { TextButton(onClick = { filtersOpen = false }) { Text("Cancel") } })
+                    editor.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = dialogLink) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val applied = CatalogFilterPolicy.applyDraft(editor, text)
+                    focus = applied.focus
+                    genre = applied.genre
+                    window = applied.window
+                    medium = applied.medium
+                    submitted = applied.search
+                    filtersOpen = false
+                }, colors = ButtonDefaults.textButtonColors(contentColor = dialogText)) { Text("Apply") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { editor = CatalogFilterPolicy.cancelDraft(editor); filtersOpen = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = dialogText),
+                ) { Text("Cancel") }
+            },
+        )
     }
     if (sourceInfoOpen) AlertDialog(onDismissRequest = { sourceInfoOpen = false }, title = { Text("Open Library") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -317,3 +431,22 @@ data class MangaRelatedDiscoveryScreen(
 
 internal fun timeLabel(time: Long): String = java.text.SimpleDateFormat("MMM d, HH:mm 'UTC'", java.util.Locale.US)
     .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date(time))
+
+@Composable
+private fun FilterOptionGroup(label: String, surface: Color, content: @Composable RowScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            Modifier.widthIn(min = 84.dp, max = 96.dp).semantics { heading() },
+            color = inkReadableForeground(Ink.Text, surface),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 2,
+        )
+        Row(
+            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
+    }
+}

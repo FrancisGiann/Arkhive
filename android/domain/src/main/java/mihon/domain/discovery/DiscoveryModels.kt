@@ -17,6 +17,9 @@ enum class CatalogFocus(val label: String, val subject: String?) {
     NOVELS("Light novels", "light_novels"), BOOKS("Fiction", "fiction"), ALL("All books", null),
     COMICS("Comics", "comics"),
 }
+enum class CatalogMedium(val label: String, val subject: String?) {
+    ALL_BOOKS("All books", null), COMICS("Comics", "comics"),
+}
 enum class CatalogGenre(val label: String, val subject: String?) {
     ANY("All genres", null), FANTASY("Fantasy", "fantasy"), ADVENTURE("Adventure", "adventure"),
     ROMANCE("Romance", "romance"), SCIFI("Science fiction", "science_fiction"), MYSTERY("Mystery", "mystery"),
@@ -27,7 +30,23 @@ enum class CatalogWindow(val label: String, val path: String?, val days: Int?) {
 }
 data class CatalogQuery(val focus: CatalogFocus = CatalogFocus.MANGA,
     val genre: CatalogGenre = CatalogGenre.ANY, val window: CatalogWindow = CatalogWindow.SUBJECT,
-    val search: String = "")
+    val search: String = "", val medium: CatalogMedium = CatalogMedium.ALL_BOOKS) {
+    /** Canonicalizes combinations that older saved UI state and legacy call sites could express. */
+    fun normalized(): CatalogQuery {
+        val legacyComics = focus == CatalogFocus.COMICS
+        val nextMedium = if (legacyComics) CatalogMedium.COMICS else medium
+        val nextFocus = when {
+            legacyComics -> CatalogFocus.ALL
+            nextMedium == CatalogMedium.COMICS && focus in setOf(CatalogFocus.NOVELS, CatalogFocus.BOOKS) -> CatalogFocus.ALL
+            else -> focus
+        }
+        return copy(
+            medium = nextMedium,
+            focus = nextFocus,
+            window = if (search.isNotBlank()) CatalogWindow.SUBJECT else window,
+        )
+    }
+}
 
 data class CatalogEdition(val id: String, val title: String, val publishers: List<String>,
     val published: String?, val isbn: List<String>, val languageIds: List<String>, val format: String?,

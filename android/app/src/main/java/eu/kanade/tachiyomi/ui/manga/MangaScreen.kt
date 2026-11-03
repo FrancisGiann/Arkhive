@@ -155,6 +155,7 @@ class MangaScreen(
                     focusName = discovery.query.focus.name,
                     genreName = discovery.query.genre.name,
                     provenance = discovery.provenance,
+                    mediumName = discovery.query.medium.name,
                 ))
             },
             onFilterButtonClicked = viewModel::showSettingsDialog,
